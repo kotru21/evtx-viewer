@@ -126,6 +126,38 @@ def test_verify_bad_file_reported_not_crash(monkeypatch, capsys, tmp_path):
     assert "broken.evtx" in out  # ошибка чтения сообщается, без падения
 
 
+# ---------- единый таймлайн ----------
+def test_timeline_merges_and_sorts(monkeypatch, capsys, security_evtx, printservice_evtx):
+    out = run(monkeypatch, capsys, security_evtx, printservice_evtx, "--timeline")
+    lines = _event_lines(out)
+    assert len(lines) == 11  # 7 + 4 из обоих файлов
+    assert all(".evtx]" in ln for ln in lines)  # колонка источника в каждой строке
+    # самое раннее событие (printservice, 2026-05-06) — первым
+    assert lines[0].startswith("2026-05-06")
+    assert "printservice-admin.evtx" in lines[0]
+    # строки отсортированы по времени
+    stamps = [ln[:19] for ln in lines]
+    assert stamps == sorted(stamps)
+
+
+def test_timeline_merged_summary(monkeypatch, capsys, security_evtx, printservice_evtx):
+    out = run(monkeypatch, capsys, security_evtx, printservice_evtx, "--timeline", "--summary")
+    assert "Всего: 11 записей (2 файлов)" in out
+
+
+def test_timeline_respects_limit(monkeypatch, capsys, security_evtx, printservice_evtx):
+    out = run(monkeypatch, capsys, security_evtx, printservice_evtx, "--timeline", "--limit", "3")
+    assert len(_event_lines(out)) == 3
+
+
+def test_timeline_with_eid_filter(monkeypatch, capsys, security_evtx, printservice_evtx):
+    # только 823 из printservice + 4624 из security, слиты по времени
+    out = run(monkeypatch, capsys, security_evtx, printservice_evtx, "--timeline", "--eid", "823,4624")
+    lines = _event_lines(out)
+    assert len(lines) == 6  # 4x823 + 2x4624
+    assert all("EID   823" in ln or "EID  4624" in ln for ln in lines)
+
+
 # ---------- полный дамп ----------
 def test_full_dump_output(monkeypatch, capsys, security_evtx):
     out = run(monkeypatch, capsys, security_evtx, "--eid", "1102", "--full")

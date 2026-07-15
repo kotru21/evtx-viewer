@@ -16,7 +16,7 @@ evtxview — просмотр и триаж Windows .evtx на любой ОС.
   evtxview *.evtx --summary            # сводка по нескольким файлам
 """
 
-import argparse, sys, json, re, struct, csv, glob
+import argparse, sys, os, json, re, struct, csv, glob
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
@@ -231,8 +231,9 @@ def parse_dt(s):
             continue
     sys.exit(f"Не понял дату: {s} (формат: 'YYYY-MM-DD HH:MM:SS')")
 
-def summarize_line(rec, offset):
+def summarize_line(rec, offset, source=None):
     t = to_local(rec.utc, offset)
+    src = f"  {C.B}[{source}]{C.X}" if source else ''
     # наиболее показательные поля для однострочной сводки, по приоритету
     interesting = []
     for key in ('Image','TargetImage','SourceImage','CommandLine','User',
@@ -246,16 +247,42 @@ def summarize_line(rec, offset):
             interesting.append(f"{key}={val}")
     extra = ' '.join(interesting[:4])
     col = C.R if rec.eid in HOT_EID else C.CY
-    return f"{C.DIM}{t}{C.X}  {col}EID {rec.eid:>5}{C.X}  {extra}"
+    return f"{C.DIM}{t}{C.X}{src}  {col}EID {rec.eid:>5}{C.X}  {extra}"
 
-def full_dump(rec, offset):
+def full_dump(rec, offset, source=None):
     print(f"{C.BOLD}{'='*70}{C.X}")
-    print(f"{C.R if rec.eid in HOT_EID else C.CY}EID {rec.eid}{C.X}  {C.DIM}{to_local(rec.utc,offset)} (local)  |  {rec.utc} UTC{C.X}")
+    src = f"  {C.B}[{source}]{C.X}" if source else ''
+    print(f"{C.R if rec.eid in HOT_EID else C.CY}EID {rec.eid}{C.X}{src}  {C.DIM}{to_local(rec.utc,offset)} (local)  |  {rec.utc} UTC{C.X}")
     print(f"Provider: {rec.provider}  |  Computer: {rec.computer}")
     if rec.data:
         w = max(len(k) for k in rec.data)
         for k, v in rec.data.items():
             print(f"   {C.Y}{k:>{w}}{C.X} = {v}")
+
+def export_row(rec, path, tz):
+    """Плоский словарь события для CSV/JSON: метаполя + все поля данных."""
+    d = dict(rec.data)
+    d['_EventID'] = rec.eid
+    d['_UTC'] = rec.utc
+    d['_Local'] = to_local(rec.utc, tz)
+    d['_Provider'] = rec.provider
+    d['_Computer'] = rec.computer
+    d['_SourceFile'] = path
+    return d
+
+def print_summary(recs, tz, files=None):
+    """Сводка: количество, диапазон времени, распределение EventID."""
+    from collections import Counter
+    cnt = Counter(r.eid for r in recs)
+    times = sorted(r.utc for r in recs if r.utc)
+    suffix = f" ({files} файлов)" if files else ""
+    print(f"  Всего: {len(recs)} записей{suffix}")
+    if times:
+        print(f"  Диапазон (UTC): {times[0][:19]}  ..  {times[-1][:19]}")
+    print("  EventID:")
+    for eid, n in cnt.most_common():
+        hot = f" {C.R}<-- security-relevant{C.X}" if eid in HOT_EID else ""
+        print(f"    {eid:>6}: {n}{hot}")
 
 def main():
     ap = argparse.ArgumentParser(
@@ -270,6 +297,7 @@ def main():
     ap.add_argument('--tz', type=float, default=3.0, help='сдвиг локального времени в часах (по умолч. +3)')
     ap.add_argument('--summary', action='store_true', help='сводка: распределение EID и диапазон времени')
     ap.add_argument('--full', action='store_true', help='полный дамп всех полей каждого события')
+    ap.add_argument('--timeline', action='store_true', help='единая лента из всех файлов, отсортированная по времени')
     ap.add_argument('--verify', action='store_true', help='сверка полноты парсинга (chunk-заголовки)')
     ap.add_argument('--csv', metavar='FILE', help='экспорт в CSV')
     ap.add_argument('--json', metavar='FILE', help='экспорт распарсенных событий в JSON')
@@ -286,6 +314,7 @@ def main():
     grep = args.grep.lower() if args.grep else None
 
     all_rows = []
+    timeline = []  # (path, rec) со всех файлов для --timeline
 
     for path in paths:
         try:
@@ -331,21 +360,17 @@ def main():
                     continue
             sel.append(rec)
 
+        # в режиме таймлайна события копятся и рендерятся после цикла
+        if args.timeline:
+            timeline.extend((path, rec) for rec in sel)
+            continue
+
         if len(paths) > 1:
             print(f"\n{C.BOLD}### {path}{C.X}  ({len(sel)}/{len(recs)} после фильтров"
                   + (f", chunk-errors {errs}" if errs else "") + ")")
 
         if args.summary:
-            from collections import Counter
-            cnt = Counter(r.eid for r in sel)
-            times = sorted(r.utc for r in sel if r.utc)
-            print(f"  Всего: {len(sel)} записей")
-            if times:
-                print(f"  Диапазон (UTC): {times[0][:19]}  ..  {times[-1][:19]}")
-            print("  EventID:")
-            for eid, n in cnt.most_common():
-                hot = f" {C.R}<-- security-relevant{C.X}" if eid in HOT_EID else ""
-                print(f"    {eid:>6}: {n}{hot}")
+            print_summary(sel, args.tz)
             continue
 
         shown = 0
@@ -358,16 +383,27 @@ def main():
             else:
                 print(summarize_line(rec, args.tz))
             shown += 1
-
             if args.csv or args.json:
-                d = dict(rec.data)
-                d['_EventID'] = rec.eid
-                d['_UTC'] = rec.utc
-                d['_Local'] = to_local(rec.utc, args.tz)
-                d['_Provider'] = rec.provider
-                d['_Computer'] = rec.computer
-                d['_SourceFile'] = path
-                all_rows.append(d)
+                all_rows.append(export_row(rec, path, args.tz))
+
+    if args.timeline:
+        timeline.sort(key=lambda pr: (pr[1].utc == '', pr[1].utc))
+        if args.summary:
+            print_summary([rec for _, rec in timeline], args.tz, files=len(paths))
+        else:
+            shown = 0
+            for path, rec in timeline:
+                if args.limit and shown >= args.limit:
+                    print(f"  {C.DIM}... (ограничено --limit {args.limit}){C.X}")
+                    break
+                src = os.path.basename(path)
+                if args.full:
+                    full_dump(rec, args.tz, source=src)
+                else:
+                    print(summarize_line(rec, args.tz, source=src))
+                shown += 1
+                if args.csv or args.json:
+                    all_rows.append(export_row(rec, path, args.tz))
 
     # экспорт
     if args.json and all_rows:
