@@ -50,7 +50,9 @@ evtxview *.evtx --verify                          # проверить все н
 - `read_records(path)` — читает все записи через `PyEvtxParser`, ловит `RuntimeError` на битых chunk'ах
 - `verify_completeness(path, seen_ids)` — ручной разбор заголовков chunk'ов (`ElfChnk\x00`, шаг 0x10000). Сверяет счётчик (номера записей, offset 0x08/0x10) **и** ищет пропуски в фактических `EventRecordID` против диапазона из заголовков (offset 0x18/0x20). Пустые chunk'и (sentinel `0xFFFF…FF`) игнорируются
 - `get_record_id(xml)` — извлекает `EventRecordID` (для сверки полноты)
-- `get_eid/get_utc/get_provider/get_computer/get_data_fields` — извлечение полей регулярками из XML (быстро, без полного XML-парсинга)
+- `parse_record(xml) -> EventRecord` — **основной путь разбора**: парсит запись один раз через `ElementTree` (устойчив к namespace, атрибутам, многострочным значениям; декодирует XML-сущности `&lt;`→`<`). При битом XML — fallback на regex-функции ниже
+- `EventRecord` — датакласс разобранной записи (`eid`, `record_id`, `utc`, `provider`, `computer`, `data`)
+- `get_eid/get_utc/get_provider/get_computer/get_data_fields` — извлечение полей регулярками (fallback-путь для `parse_record` + сверка)
 - `to_local(utc, offset)` — конвертация UTC→локальное
 - `summarize_line` / `full_dump` — форматирование вывода
 - `HOT_EID` — множество security-relevant EventID для подсветки
@@ -60,7 +62,7 @@ evtxview *.evtx --verify                          # проверить все н
 
 Осознанные упрощения текущей версии, которые стоит доработать:
 
-1. **Парсинг полей регулярками, а не XML-парсером.** Быстро, но хрупко к нестандартному форматированию. Кандидат на переход к `lxml` с fallback на regex.
+1. ~~**Парсинг полей регулярками, а не XML-парсером.**~~ — **сделано.** `parse_record()` разбирает через `ElementTree` (namespace/атрибуты/многострочные значения, декодирование XML-сущностей), с fallback на regex для битого XML. На корпусе из 137 файлов: 0 потерянных значений, +396 полей, которые regex пропускал, декодированные `&lt;`→`<`.
 2. **`--after/--before` только UTC.** Нет флага для указания, что фильтр в локальном времени. Стоит добавить `--tz-filter`.
 3. **Нет пресетов.** Напрашиваются `--preset process-tree` (EID 1 с построением дерева parent→child по ProcessGuid), `--preset logon-analysis` (4624/4625/4634 + LogonType + Source IP), `--preset network` (EID 3 сгруппированный по dst).
 4. **Нет корреляции между файлами.** Полезно было бы строить единый таймлайн из нескольких EVTX сразу, сортированный по времени (сейчас `*.evtx` обрабатывает файлы последовательно, не сливает).

@@ -17,7 +17,10 @@ evtxview — удобный просмотр Windows .evtx на Linux.
 """
 
 import argparse, sys, json, re, struct, csv, glob
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
+from typing import Dict, Optional
 
 # ---------- вывод в UTF-8 (иначе кириллица бьётся на Windows-консоли) ----------
 def force_utf8_output():
@@ -144,6 +147,69 @@ def get_data_fields(xml):
             d.setdefault(m.group(1), m.group(2).strip())
     return d
 
+# ---------- единая модель записи (парсинг один раз) ----------
+@dataclass
+class EventRecord:
+    """Разобранная запись события. Строится один раз через parse_record()."""
+    xml: str
+    eid: str = '?'
+    record_id: Optional[int] = None
+    utc: str = ''
+    provider: str = ''
+    computer: str = ''
+    data: Dict[str, str] = field(default_factory=dict)
+
+def _localname(tag: str) -> str:
+    """Имя тега без XML-namespace: '{ns}Data' -> 'Data'."""
+    return tag.rpartition('}')[2]
+
+def _parse_record_regex(xml: str) -> EventRecord:
+    """Fallback-разбор регулярками (для битого/нестандартного XML)."""
+    return EventRecord(
+        xml=xml, eid=get_eid(xml), record_id=get_record_id(xml),
+        utc=get_utc(xml), provider=get_provider(xml),
+        computer=get_computer(xml), data=get_data_fields(xml),
+    )
+
+def parse_record(xml: str) -> EventRecord:
+    """Разбирает XML записи один раз. Основной путь — ElementTree (устойчив к
+    атрибутам/namespace/многострочным значениям); при ошибке — fallback на regex.
+
+    Байты вместо str: записи начинаются с `<?xml ... encoding="utf-8"?>`, а
+    ET.fromstring на str с декларацией кодировки бросает ValueError."""
+    try:
+        root = ET.fromstring(xml.encode('utf-8'))
+    except (ET.ParseError, ValueError):
+        return _parse_record_regex(xml)
+
+    rec = EventRecord(xml=xml)
+    for el in root.iter():
+        name = _localname(el.tag)
+        if name == 'EventID':
+            rec.eid = (el.text or '').strip() or rec.eid
+        elif name == 'EventRecordID':
+            txt = (el.text or '').strip()
+            if txt.isdigit():
+                rec.record_id = int(txt)
+        elif name == 'TimeCreated':
+            rec.utc = el.get('SystemTime') or rec.utc
+        elif name == 'Provider':
+            rec.provider = el.get('Name') or rec.provider
+        elif name == 'Computer':
+            rec.computer = (el.text or '').strip() or rec.computer
+        elif name == 'Data':
+            key = el.get('Name')
+            if key:
+                rec.data[key] = (el.text or '').strip()
+        elif name == 'UserData':
+            # UserData (PrintService и др.): листья-элементы с текстом
+            for leaf in el.iter():
+                if leaf is el or len(leaf):
+                    continue
+                if leaf.text and leaf.text.strip():
+                    rec.data.setdefault(_localname(leaf.tag), leaf.text.strip())
+    return rec
+
 def to_local(utc_str, offset_hours):
     """ISO UTC -> локальное время со сдвигом."""
     if not utc_str:
@@ -168,34 +234,30 @@ def parse_dt(s):
     sys.exit(f"Не понял дату: {s} (формат: 'YYYY-MM-DD HH:MM:SS')")
 
 # ---------- краткая строка события ----------
-def summarize_line(xml, offset):
-    eid = get_eid(xml)
-    t = to_local(get_utc(xml), offset)
-    d = get_data_fields(xml)
+def summarize_line(rec, offset):
+    t = to_local(rec.utc, offset)
     # выбираем самые полезные поля по типу события
     interesting = []
     for key in ('Image','TargetImage','SourceImage','CommandLine','User',
                 'SubjectUserName','TargetUserName','ParentImage',
                 'DestinationIp','DestinationPort','SourceIp','SourcePort','Initiated',
                 'TargetFilename','TargetObject','IpAddress','LogonType','ServiceName'):
-        if key in d and d[key]:
-            val = d[key]
+        if key in rec.data and rec.data[key]:
+            val = rec.data[key]
             if len(val) > 70:
                 val = val[:67] + '...'
             interesting.append(f"{key}={val}")
     extra = ' '.join(interesting[:4])
-    col = C.R if eid in HOT_EID else C.CY
-    return f"{C.DIM}{t}{C.X}  {col}EID {eid:>5}{C.X}  {extra}"
+    col = C.R if rec.eid in HOT_EID else C.CY
+    return f"{C.DIM}{t}{C.X}  {col}EID {rec.eid:>5}{C.X}  {extra}"
 
-def full_dump(xml, offset):
-    eid = get_eid(xml)
+def full_dump(rec, offset):
     print(f"{C.BOLD}{'='*70}{C.X}")
-    print(f"{C.R if eid in HOT_EID else C.CY}EID {eid}{C.X}  {C.DIM}{to_local(get_utc(xml),offset)} (local)  |  {get_utc(xml)} UTC{C.X}")
-    print(f"Provider: {get_provider(xml)}  |  Computer: {get_computer(xml)}")
-    d = get_data_fields(xml)
-    if d:
-        w = max(len(k) for k in d)
-        for k, v in d.items():
+    print(f"{C.R if rec.eid in HOT_EID else C.CY}EID {rec.eid}{C.X}  {C.DIM}{to_local(rec.utc,offset)} (local)  |  {rec.utc} UTC{C.X}")
+    print(f"Provider: {rec.provider}  |  Computer: {rec.computer}")
+    if rec.data:
+        w = max(len(k) for k in rec.data)
+        for k, v in rec.data.items():
             print(f"   {C.Y}{k:>{w}}{C.X} = {v}")
 
 # ---------- main ----------
@@ -253,26 +315,28 @@ def main():
                 print(f"{path}: не EVTX или не удалось разобрать заголовок")
             continue
 
+        # разбор каждой записи один раз
+        records = [parse_record(xml) for xml in recs]
+
         # фильтрация
         sel = []
-        for xml in recs:
-            if eid_filter and get_eid(xml) not in eid_filter:
+        for rec in records:
+            if eid_filter and rec.eid not in eid_filter:
                 continue
-            if grep and grep not in xml.lower():
+            if grep and grep not in rec.xml.lower():
                 continue
             if after or before:
-                u = get_utc(xml)
-                if not u:
+                if not rec.utc:
                     continue
                 try:
-                    dt = datetime.fromisoformat(u.replace('Z','+00:00'))
+                    dt = datetime.fromisoformat(rec.utc.replace('Z','+00:00'))
                 except Exception:
                     continue
                 if after and dt < after:
                     continue
                 if before and dt > before:
                     continue
-            sel.append(xml)
+            sel.append(rec)
 
         if len(paths) > 1:
             print(f"\n{C.BOLD}### {path}{C.X}  ({len(sel)}/{len(recs)} после фильтров"
@@ -280,8 +344,8 @@ def main():
 
         if args.summary:
             from collections import Counter
-            cnt = Counter(get_eid(x) for x in sel)
-            times = sorted(get_utc(x) for x in sel if get_utc(x))
+            cnt = Counter(r.eid for r in sel)
+            times = sorted(r.utc for r in sel if r.utc)
             print(f"  Всего: {len(sel)} записей")
             if times:
                 print(f"  Диапазон (UTC): {times[0][:19]}  ..  {times[-1][:19]}")
@@ -292,23 +356,23 @@ def main():
             continue
 
         shown = 0
-        for xml in sel:
+        for rec in sel:
             if args.limit and shown >= args.limit:
                 print(f"  {C.DIM}... (ограничено --limit {args.limit}){C.X}")
                 break
             if args.full:
-                full_dump(xml, args.tz)
+                full_dump(rec, args.tz)
             else:
-                print(summarize_line(xml, args.tz))
+                print(summarize_line(rec, args.tz))
             shown += 1
 
             if args.csv or args.json:
-                d = get_data_fields(xml)
-                d['_EventID'] = get_eid(xml)
-                d['_UTC'] = get_utc(xml)
-                d['_Local'] = to_local(get_utc(xml), args.tz)
-                d['_Provider'] = get_provider(xml)
-                d['_Computer'] = get_computer(xml)
+                d = dict(rec.data)
+                d['_EventID'] = rec.eid
+                d['_UTC'] = rec.utc
+                d['_Local'] = to_local(rec.utc, args.tz)
+                d['_Provider'] = rec.provider
+                d['_Computer'] = rec.computer
                 d['_SourceFile'] = path
                 all_rows.append(d)
 

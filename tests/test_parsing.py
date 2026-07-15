@@ -80,7 +80,7 @@ def test_parse_dt_bad_raises():
 def test_summarize_line_truncates_long_values():
     long_cmd = "cmd /c " + "A" * 200
     xml = EVENTDATA_XML.replace("cmd /c whoami", long_cmd)
-    line = cli.summarize_line(xml, 3.0)
+    line = cli.summarize_line(cli.parse_record(xml), 3.0)
     assert "..." in line
     assert "EID" in line
 
@@ -88,3 +88,69 @@ def test_summarize_line_truncates_long_values():
 def test_hot_eid_membership():
     assert "1102" in cli.HOT_EID  # очистка лога
     assert "4625" in cli.HOT_EID  # неуспешный вход
+
+
+# ---------- parse_record: единая модель ----------
+def test_parse_record_eventdata():
+    """Основной путь — ElementTree — на XML с декларацией кодировки."""
+    xml = '<?xml version="1.0" encoding="utf-8"?>' + EVENTDATA_XML.split("?>", 1)[-1]
+    rec = cli.parse_record(xml)
+    assert rec.eid == "1"
+    assert rec.provider == "Microsoft-Windows-Sysmon"
+    assert rec.computer == "vm1-PC"
+    assert rec.utc == "2026-05-11T12:15:49.123456Z"
+    assert rec.data["CommandLine"] == "cmd /c whoami"
+
+
+def test_parse_record_userdata_branch():
+    rec = cli.parse_record(USERDATA_XML)
+    assert rec.eid == "823"
+    assert rec.data["Module"] == "spoolsv.exe"
+    assert rec.data["Status"] == "0x0"
+
+
+def test_parse_record_namespaced_multiline():
+    """namespace на тегах и многострочное значение — regex это ломало."""
+    xml = (
+        '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+        "<System><EventID>4104</EventID>"
+        '<Provider Name="Microsoft-Windows-PowerShell"/>'
+        '<TimeCreated SystemTime="2026-05-11T12:00:00.0Z"/>'
+        "<Computer>vm1-PC</Computer></System>"
+        '<EventData><Data Name="ScriptBlockText">line1\nline2\nline3</Data></EventData>'
+        "</Event>"
+    )
+    rec = cli.parse_record(xml)
+    assert rec.eid == "4104"
+    assert rec.data["ScriptBlockText"] == "line1\nline2\nline3"
+
+
+def test_parse_record_falls_back_on_malformed_xml():
+    """Битый XML (незакрытый тег) — не падаем, извлекаем regex-ом что можем."""
+    broken = "<Event><System><EventID>4625</EventID><Computer>vm1-PC</Event>"
+    rec = cli.parse_record(broken)
+    assert rec.eid == "4625"  # получено fallback-регуляркой
+
+
+def test_parse_record_decodes_xml_entities():
+    """Значение с экранированным XML (GroupPolicy GPOInfoList) декодируется,
+    а не остаётся сырым &lt;/&gt; как было при regex-разборе."""
+    xml = (
+        "<Event><System><EventID>5312</EventID></System>"
+        '<EventData><Data Name="GPOInfoList">'
+        "&lt;GPO&gt;&lt;Name&gt;Local Group Policy&lt;/Name&gt;&lt;/GPO&gt;"
+        "</Data></EventData></Event>"
+    )
+    rec = cli.parse_record(xml)
+    assert rec.data["GPOInfoList"] == "<GPO><Name>Local Group Policy</Name></GPO>"
+
+
+def test_parse_record_captures_self_closing_and_empty():
+    """Self-closing <Data Name="x"/> и пустые — не ломают разбор."""
+    xml = (
+        "<Event><System><EventID>1</EventID></System>"
+        '<EventData><Data Name="Empty"/><Data Name="Val">x</Data></EventData></Event>'
+    )
+    rec = cli.parse_record(xml)
+    assert rec.data["Val"] == "x"
+    assert rec.data["Empty"] == ""
