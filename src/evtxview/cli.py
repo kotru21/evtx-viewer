@@ -69,25 +69,56 @@ def read_records(path):
             errs += 1
     return recs, errs
 
-def verify_completeness(path, got):
-    """Сверяет число записей с суммой по заголовкам chunk'ов (ловит обрезку парсера)."""
+def verify_completeness(path, seen_ids):
+    """Сверяет полноту чтения по заголовкам chunk'ов.
+
+    Заголовок chunk'а (`ElfChnk\\x00`, шаг 0x10000) несёт две пары значений:
+      * 0x08/0x10 — номера записей (последовательность 1..N) → даёт ожидаемый счётчик;
+      * 0x18/0x20 — сами EventRecordID (то, что в XML) → даёт ожидаемый диапазон.
+
+    `seen_ids` — фактически прочитанные EventRecordID. Помимо сверки счётчиков
+    ищем ПРОПУСКИ внутри объявленного диапазона идентификаторов: это ловит
+    потерю записей даже когда счётчик случайно сошёлся (TODO #8).
+    """
     data = open(path, 'rb').read()
     if data[0:8] != b'ElfFile\x00':
         return None
+    EMPTY = 0xFFFFFFFFFFFFFFFF  # sentinel в заголовке предвыделенного пустого chunk'а
     off, expected, chunks = 0x1000, 0, 0
+    id_lo, id_hi = None, None
     while off + 0x28 < len(data) and data[off:off+8] == b'ElfChnk\x00':
-        first = struct.unpack('<Q', data[off+0x08:off+0x10])[0]
-        last  = struct.unpack('<Q', data[off+0x10:off+0x18])[0]
-        if last >= first:
-            expected += last - first + 1
+        num_first = struct.unpack('<Q', data[off+0x08:off+0x10])[0]
+        num_last  = struct.unpack('<Q', data[off+0x10:off+0x18])[0]
+        rec_first = struct.unpack('<Q', data[off+0x18:off+0x20])[0]
+        rec_last  = struct.unpack('<Q', data[off+0x20:off+0x28])[0]
         chunks += 1
         off += 0x10000
-    return {'chunks': chunks, 'expected': expected, 'got': got}
+        if num_last != EMPTY and num_first != EMPTY and num_last >= num_first:
+            expected += num_last - num_first + 1
+        if rec_last != EMPTY and rec_first != EMPTY and rec_last >= rec_first:
+            id_lo = rec_first if id_lo is None else min(id_lo, rec_first)
+            id_hi = rec_last if id_hi is None else max(id_hi, rec_last)
+
+    seen = {i for i in seen_ids if i is not None}
+    got = len(seen)
+    missing = []
+    if id_lo is not None and id_hi is not None:
+        missing = sorted(set(range(id_lo, id_hi + 1)) - seen)
+    complete = (got == expected) and not missing
+    return {
+        'chunks': chunks, 'expected': expected, 'got': got,
+        'id_lo': id_lo, 'id_hi': id_hi, 'missing': missing, 'complete': complete,
+    }
 
 # ---------- парсинг полей ----------
 def get_eid(xml):
     m = re.search(r'<EventID[^>]*>(\d+)</EventID>', xml)
     return m.group(1) if m else '?'
+
+def get_record_id(xml):
+    """EventRecordID (глобальный идентификатор записи) -> int или None."""
+    m = re.search(r'<EventRecordID>(\d+)</EventRecordID>', xml)
+    return int(m.group(1)) if m else None
 
 def get_utc(xml):
     m = re.search(r'SystemTime="([^"]+)"', xml)
@@ -207,12 +238,17 @@ def main():
             continue
 
         if args.verify:
-            v = verify_completeness(path, len(recs))
+            v = verify_completeness(path, (get_record_id(x) for x in recs))
             if v:
-                ok = v['expected'] == v['got']
-                mark = f"{C.G}OK{C.X}" if ok else f"{C.R}!!! ОБРЕЗКА{C.X}"
+                mark = f"{C.G}OK{C.X}" if v['complete'] else f"{C.R}!!! ОБРЕЗКА{C.X}"
                 print(f"{C.BOLD}{path}{C.X}: chunks={v['chunks']} заявлено={v['expected']} прочитано={v['got']} {mark}"
                       + (f" (chunk-errors: {errs})" if errs else ""))
+                miss = v['missing']
+                if miss:
+                    sample = ', '.join(str(i) for i in miss[:15])
+                    more = f" …(+{len(miss)-15})" if len(miss) > 15 else ""
+                    print(f"  {C.R}пропущено EventRecordID: {len(miss)}{C.X}"
+                          f"  [{sample}{more}]  (диапазон {v['id_lo']}..{v['id_hi']})")
             else:
                 print(f"{path}: не EVTX или не удалось разобрать заголовок")
             continue

@@ -21,3 +21,9 @@ def security_evtx() -> str:
 def printservice_evtx() -> str:
     """4 записи PrintService/Admin — формат UserData (без EventData)."""
     return str(FIXTURES / "printservice-admin.evtx")
+
+
+@pytest.fixture
+def empty_evtx() -> str:
+    """0 записей: один предвыделенный пустой chunk (sentinel-заголовок)."""
+    return str(FIXTURES / "empty.evtx")
