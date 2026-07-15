@@ -149,6 +149,18 @@ mypy src/evtxview # типы
 
 CI (GitHub Actions) прогоняет ruff, mypy и pytest на Windows и Linux (Python 3.9 и 3.12).
 
+### Структура
+
+| Модуль | Ответственность |
+|---|---|
+| `reader.py` | Чтение `.evtx` и проверка полноты по заголовкам chunk'ов |
+| `record.py` | Модель `EventRecord` и разбор полей (ElementTree + regex-fallback) |
+| `render.py` | Форматирование вывода: цвета, сводка, однострочный/полный дамп |
+| `export.py` | Экспорт в CSV/JSON |
+| `constants.py` | Наборы EID и приоритеты полей (кандидат на вынос в конфиг) |
+| `util.py` | Кодировка вывода, работа со временем |
+| `cli.py` | Разбор аргументов и оркестрация |
+
 ## Лицензия
 
 MIT — см. [LICENSE](LICENSE).

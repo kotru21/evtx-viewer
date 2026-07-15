@@ -3,7 +3,13 @@ from datetime import datetime, timezone
 
 import pytest
 
-from evtxview import cli
+from evtxview.constants import HOT_EID
+from evtxview.record import (
+    get_data_fields, get_eid, get_provider, get_computer, get_record_id,
+    get_utc, parse_record,
+)
+from evtxview.render import summarize_line
+from evtxview.util import parse_dt, to_local
 
 EVENTDATA_XML = """<?xml version="1.0"?>
 <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
@@ -38,73 +44,73 @@ USERDATA_XML = """<?xml version="1.0"?>
 
 
 def test_get_eid():
-    assert cli.get_eid(EVENTDATA_XML) == "1"
-    assert cli.get_eid("<Event/>") == "?"
+    assert get_eid(EVENTDATA_XML) == "1"
+    assert get_eid("<Event/>") == "?"
 
 
 def test_get_utc_provider_computer():
-    assert cli.get_utc(EVENTDATA_XML) == "2026-05-11T12:15:49.123456Z"
-    assert cli.get_provider(EVENTDATA_XML) == "Microsoft-Windows-Sysmon"
-    assert cli.get_computer(EVENTDATA_XML) == "vm1-PC"
+    assert get_utc(EVENTDATA_XML) == "2026-05-11T12:15:49.123456Z"
+    assert get_provider(EVENTDATA_XML) == "Microsoft-Windows-Sysmon"
+    assert get_computer(EVENTDATA_XML) == "vm1-PC"
 
 
 def test_get_data_fields_eventdata():
-    d = cli.get_data_fields(EVENTDATA_XML)
+    d = get_data_fields(EVENTDATA_XML)
     assert d["Image"].endswith("cmd.exe")
     assert d["CommandLine"] == "cmd /c whoami"
     assert d["User"] == "vm1\\john"
 
 
 def test_get_data_fields_userdata_branch():
-    d = cli.get_data_fields(USERDATA_XML)
+    d = get_data_fields(USERDATA_XML)
     assert d["Module"] == "spoolsv.exe"
     assert d["Status"] == "0x0"
 
 
 def test_to_local_offset():
     # UTC 12:15:49 при сдвиге +3 -> 15:15:49
-    assert cli.to_local("2026-05-11T12:15:49.000000Z", 3.0) == "2026-05-11 15:15:49"
-    assert cli.to_local("", 3.0) == ""
+    assert to_local("2026-05-11T12:15:49.000000Z", 3.0) == "2026-05-11 15:15:49"
+    assert to_local("", 3.0) == ""
 
 
 def test_to_local_bad_input_fallback():
     # непарсимую строку возвращаем как есть (обрезав до 19 символов)
-    assert cli.to_local("не-дата-2026-xxxxxxxxxxxx", 3.0) == "не-дата-2026-xxxxxx"
+    assert to_local("не-дата-2026-xxxxxxxxxxxx", 3.0) == "не-дата-2026-xxxxxx"
 
 
 def test_get_record_id():
-    assert cli.get_record_id("<EventRecordID>13501</EventRecordID>") == 13501
-    assert cli.get_record_id("<Event/>") is None
+    assert get_record_id("<EventRecordID>13501</EventRecordID>") == 13501
+    assert get_record_id("<Event/>") is None
 
 
 def test_parse_dt_formats():
-    assert cli.parse_dt("2026-05-11 12:24") == datetime(2026, 5, 11, 12, 24, tzinfo=timezone.utc)
-    assert cli.parse_dt("2026-05-11") == datetime(2026, 5, 11, tzinfo=timezone.utc)
+    assert parse_dt("2026-05-11 12:24") == datetime(2026, 5, 11, 12, 24, tzinfo=timezone.utc)
+    assert parse_dt("2026-05-11") == datetime(2026, 5, 11, tzinfo=timezone.utc)
 
 
 def test_parse_dt_bad_raises():
     with pytest.raises(SystemExit):
-        cli.parse_dt("not-a-date")
+        parse_dt("not-a-date")
 
 
 def test_summarize_line_truncates_long_values():
     long_cmd = "cmd /c " + "A" * 200
     xml = EVENTDATA_XML.replace("cmd /c whoami", long_cmd)
-    line = cli.summarize_line(cli.parse_record(xml), 3.0)
+    line = summarize_line(parse_record(xml), 3.0)
     assert "..." in line
     assert "EID" in line
 
 
 def test_hot_eid_membership():
-    assert "1102" in cli.HOT_EID  # очистка лога
-    assert "4625" in cli.HOT_EID  # неуспешный вход
+    assert "1102" in HOT_EID  # очистка лога
+    assert "4625" in HOT_EID  # неуспешный вход
 
 
 # ---------- parse_record: единая модель ----------
 def test_parse_record_eventdata():
     """Основной путь — ElementTree — на XML с декларацией кодировки."""
     xml = '<?xml version="1.0" encoding="utf-8"?>' + EVENTDATA_XML.split("?>", 1)[-1]
-    rec = cli.parse_record(xml)
+    rec = parse_record(xml)
     assert rec.eid == "1"
     assert rec.provider == "Microsoft-Windows-Sysmon"
     assert rec.computer == "vm1-PC"
@@ -113,7 +119,7 @@ def test_parse_record_eventdata():
 
 
 def test_parse_record_userdata_branch():
-    rec = cli.parse_record(USERDATA_XML)
+    rec = parse_record(USERDATA_XML)
     assert rec.eid == "823"
     assert rec.data["Module"] == "spoolsv.exe"
     assert rec.data["Status"] == "0x0"
@@ -130,7 +136,7 @@ def test_parse_record_namespaced_multiline():
         '<EventData><Data Name="ScriptBlockText">line1\nline2\nline3</Data></EventData>'
         "</Event>"
     )
-    rec = cli.parse_record(xml)
+    rec = parse_record(xml)
     assert rec.eid == "4104"
     assert rec.data["ScriptBlockText"] == "line1\nline2\nline3"
 
@@ -138,7 +144,7 @@ def test_parse_record_namespaced_multiline():
 def test_parse_record_falls_back_on_malformed_xml():
     """Битый XML (незакрытый тег) — не падаем, извлекаем regex-ом что можем."""
     broken = "<Event><System><EventID>4625</EventID><Computer>vm1-PC</Event>"
-    rec = cli.parse_record(broken)
+    rec = parse_record(broken)
     assert rec.eid == "4625"  # получено fallback-регуляркой
 
 
@@ -151,7 +157,7 @@ def test_parse_record_decodes_xml_entities():
         "&lt;GPO&gt;&lt;Name&gt;Local Group Policy&lt;/Name&gt;&lt;/GPO&gt;"
         "</Data></EventData></Event>"
     )
-    rec = cli.parse_record(xml)
+    rec = parse_record(xml)
     assert rec.data["GPOInfoList"] == "<GPO><Name>Local Group Policy</Name></GPO>"
 
 
@@ -161,6 +167,6 @@ def test_parse_record_captures_self_closing_and_empty():
         "<Event><System><EventID>1</EventID></System>"
         '<EventData><Data Name="Empty"/><Data Name="Val">x</Data></EventData></Event>'
     )
-    rec = cli.parse_record(xml)
+    rec = parse_record(xml)
     assert rec.data["Val"] == "x"
     assert rec.data["Empty"] == ""
