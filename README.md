@@ -2,8 +2,12 @@
 
 Быстрый просмотр и триаж журналов Windows `.evtx` из командной строки — с **проверкой полноты чтения**.
 
-![CI](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml/badge.svg)
+[![CI](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
+![Tests](https://img.shields.io/badge/tests-49%20passing-brightgreen)
+[![Linting: Ruff](https://img.shields.io/badge/lint-ruff-261230)](https://github.com/astral-sh/ruff)
+![Checked with mypy](https://img.shields.io/badge/mypy-checked-2a6db2)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 `evtxview` построен на rust-based парсере [`evtx`](https://pypi.org/project/evtx/) и предназначен для быстрого DFIR-триажа: сводка по EventID, фильтры по времени/ID/подстроке, экспорт в CSV/JSON. Отличается от «просто просмотрщика» встроенной командой `--verify`, которая доказывает, что прочитаны все записи, а не молчаливая часть файла.
@@ -32,12 +36,49 @@
 
 ## Установка
 
+Требуется Python 3.9+. Единственная runtime-зависимость — пакет `evtx` (rust-биндинг), ставится автоматически.
+
+### Вариант 1 — команда `evtxview` в PATH (рекомендуется)
+
+[`pipx`](https://pipx.pypa.io/) ставит инструмент в изолированное окружение и сам добавляет шорткат в PATH:
+
 ```bash
-pip install -e .            # ставит evtxview + зависимость evtx, создаёт команду `evtxview`
-pip install -e ".[dev]"     # для разработки: pytest, ruff, mypy
+git clone https://github.com/kotru21/evtx-viewer
+cd evtx-viewer
+pipx install .
 ```
 
-Единственная runtime-зависимость — пакет `evtx` (rust-биндинг). После установки доступны `evtxview ...` и `python -m evtxview ...`.
+После этого команда доступна из любого каталога:
+
+```console
+$ evtxview --help
+$ evtxview Security.evtx --summary
+```
+
+### Вариант 2 — обычный pip
+
+```bash
+git clone https://github.com/kotru21/evtx-viewer
+cd evtx-viewer
+pip install .
+```
+
+`pip` создаёт исполняемый файл `evtxview` в каталоге скриптов интерпретатора. Если после установки команда `evtxview` не находится (`command not found`), этот каталог не в `PATH`:
+
+- **Windows:** обычно `%LOCALAPPDATA%\Programs\Python\PythonXX\Scripts` (или `...\Scripts` рядом с `python.exe`). Добавьте его в переменную среды `PATH` — путь пишется в предупреждении pip при установке.
+- **Linux/macOS:** обычно `~/.local/bin`. Добавьте в `~/.bashrc`/`~/.zshrc`: `export PATH="$HOME/.local/bin:$PATH"`.
+
+Универсальный запуск, не зависящий от PATH, доступен всегда:
+
+```bash
+python -m evtxview Security.evtx --summary
+```
+
+### Для разработки
+
+```bash
+pip install -e ".[dev]"     # editable + pytest, ruff, mypy
+```
 
 ## Быстрый старт
 
