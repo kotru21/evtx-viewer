@@ -45,3 +45,91 @@ def test_json_export(monkeypatch, capsys, tmp_path, security_evtx):
     assert rows[0]["_EventID"] == "1102"
     assert rows[0]["SubjectUserName"] == "john"
     assert "JSON" in out
+
+
+def _event_lines(out):
+    """Строки-события в списочном режиме начинаются с даты (без tty — без ANSI)."""
+    return [ln for ln in out.splitlines() if ln.strip().startswith("2026")]
+
+
+# ---------- фильтр по времени (UTC) ----------
+def test_after_filter_excludes_earlier(monkeypatch, capsys, security_evtx):
+    # 1102 в 12:45 отсекается, остаются 6 событий в 12:57–12:58
+    out = run(monkeypatch, capsys, security_evtx, "--after", "2026-05-11 12:50")
+    assert len(_event_lines(out)) == 6
+
+
+def test_before_filter_keeps_only_earlier(monkeypatch, capsys, security_evtx):
+    out = run(monkeypatch, capsys, security_evtx, "--before", "2026-05-11 12:50")
+    lines = _event_lines(out)
+    assert len(lines) == 1
+    assert "1102" in lines[0]
+
+
+def test_after_before_window(monkeypatch, capsys, security_evtx):
+    out = run(monkeypatch, capsys, security_evtx,
+              "--after", "2026-05-11 12:46", "--before", "2026-05-11 12:58")
+    assert len(_event_lines(out)) == 5
+
+
+# ---------- grep ----------
+def test_grep_matches_raw_xml(monkeypatch, capsys, security_evtx):
+    # только событие очистки лога (провайдер Microsoft-Windows-Eventlog)
+    out = run(monkeypatch, capsys, security_evtx, "--grep", "eventlog")
+    lines = _event_lines(out)
+    assert len(lines) == 1
+    assert "1102" in lines[0]
+
+
+# ---------- сдвиг локального времени ----------
+def test_tz_offset_in_output(monkeypatch, capsys, security_evtx):
+    out0 = run(monkeypatch, capsys, security_evtx, "--eid", "1102", "--tz", "0")
+    assert "2026-05-11 12:45:17" in out0
+    out3 = run(monkeypatch, capsys, security_evtx, "--eid", "1102", "--tz", "3")
+    assert "2026-05-11 15:45:17" in out3
+
+
+# ---------- CSV-экспорт ----------
+def test_csv_export(monkeypatch, capsys, tmp_path, security_evtx):
+    out_file = tmp_path / "out.csv"
+    run(monkeypatch, capsys, security_evtx, "--eid", "1102", "--csv", str(out_file))
+    import csv as _csv
+
+    with out_file.open(encoding="utf-8") as f:
+        reader = _csv.DictReader(f)
+        assert reader.fieldnames[0] == "_EventID"  # метаполя впереди
+        rows = list(reader)
+    assert len(rows) == 1
+    assert rows[0]["SubjectUserName"] == "john"
+    assert rows[0]["_SourceFile"].endswith("security.evtx")
+
+
+# ---------- несколько файлов ----------
+def test_multifile_headers(monkeypatch, capsys, security_evtx, printservice_evtx):
+    out = run(monkeypatch, capsys, security_evtx, printservice_evtx, "--summary")
+    assert "security.evtx" in out
+    assert "printservice-admin.evtx" in out
+
+
+# ---------- устойчивость к битому вводу ----------
+def test_bad_file_reported_not_crash(monkeypatch, capsys, tmp_path):
+    junk = tmp_path / "broken.evtx"
+    junk.write_bytes(b"this is not an evtx file")
+    out = run(monkeypatch, capsys, str(junk), "--summary")
+    assert "broken.evtx" in out  # сообщение об ошибке, без падения
+
+
+def test_verify_bad_file_reported_not_crash(monkeypatch, capsys, tmp_path):
+    junk = tmp_path / "broken.evtx"
+    junk.write_bytes(b"not-evtx")
+    out = run(monkeypatch, capsys, str(junk), "--verify")
+    assert "broken.evtx" in out  # ошибка чтения сообщается, без падения
+
+
+# ---------- полный дамп ----------
+def test_full_dump_output(monkeypatch, capsys, security_evtx):
+    out = run(monkeypatch, capsys, security_evtx, "--eid", "1102", "--full")
+    assert "EID 1102" in out
+    assert "Provider: Microsoft-Windows-Eventlog" in out
+    assert "Computer: vm1-PC" in out
+    assert "SubjectUserName = john" in out

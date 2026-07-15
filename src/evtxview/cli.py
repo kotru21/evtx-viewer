@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-evtxview — удобный просмотр Windows .evtx на Linux.
+evtxview — просмотр и триаж Windows .evtx на любой ОС.
 
-Использует rust-based парсер `evtx` (pip install evtx), который корректно
-читает ВСЕ chunk'и файла — в отличие от python-evtx, который может молча
-останавливаться на первом chunk и терять 95% записей.
+Построен на rust-based парсере `evtx`, который читает ВСЕ chunk'и файла —
+в отличие от python-evtx, способного молча остановиться на первом chunk и
+потерять большую часть записей. Флаг --verify сверяет полноту чтения.
 
 Примеры:
   evtxview Security.evtx --summary
@@ -22,10 +22,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional
 
-# ---------- вывод в UTF-8 (иначе кириллица бьётся на Windows-консоли) ----------
+
 def force_utf8_output():
-    """Windows по умолчанию пишет stdout в кодировке локали (cp1251) — кириллица
-    превращается в мусор. Принудительно переключаем потоки на UTF-8."""
+    """Windows пишет stdout в кодировке локали (cp1251) — кириллица бьётся.
+    Принудительно переключаем потоки на UTF-8."""
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, 'reconfigure', None)
         if reconfigure:
@@ -36,23 +36,23 @@ def force_utf8_output():
 
 force_utf8_output()
 
-# ---------- зависимость ----------
 try:
     from evtx import PyEvtxParser
 except ImportError:
-    sys.exit("Нужен rust-based парсер. Установи:  pip install evtx --break-system-packages")
+    sys.exit("Нужен rust-based парсер evtx:  pip install evtx")
 
 NS = 'http://schemas.microsoft.com/win/2004/08/events/event'
 
-# ---------- цвета (только если tty) ----------
+
 class C:
+    """ANSI-цвета — включаются только при выводе в терминал."""
     on = sys.stdout.isatty()
     R = '\033[31m' if on else ''; G = '\033[32m' if on else ''
     Y = '\033[33m' if on else ''; B = '\033[34m' if on else ''
     CY= '\033[36m' if on else ''; DIM='\033[2m' if on else ''
     BOLD='\033[1m' if on else ''; X = '\033[0m' if on else ''
 
-# EID, которые стоит подсветить как security-relevant
+# EventID, помечаемые как security-relevant (подсветка + метка в --summary)
 HOT_EID = {
     '1102','104','4624','4625','4634','4648','4672','4720','4732','4728',
     '7045','1149','21','22','1','3','10','11','13',
@@ -113,7 +113,6 @@ def verify_completeness(path, seen_ids):
         'id_lo': id_lo, 'id_hi': id_hi, 'missing': missing, 'complete': complete,
     }
 
-# ---------- парсинг полей ----------
 def get_eid(xml):
     m = re.search(r'<EventID[^>]*>(\d+)</EventID>', xml)
     return m.group(1) if m else '?'
@@ -147,7 +146,6 @@ def get_data_fields(xml):
             d.setdefault(m.group(1), m.group(2).strip())
     return d
 
-# ---------- единая модель записи (парсинг один раз) ----------
 @dataclass
 class EventRecord:
     """Разобранная запись события. Строится один раз через parse_record()."""
@@ -233,10 +231,9 @@ def parse_dt(s):
             continue
     sys.exit(f"Не понял дату: {s} (формат: 'YYYY-MM-DD HH:MM:SS')")
 
-# ---------- краткая строка события ----------
 def summarize_line(rec, offset):
     t = to_local(rec.utc, offset)
-    # выбираем самые полезные поля по типу события
+    # наиболее показательные поля для однострочной сводки, по приоритету
     interesting = []
     for key in ('Image','TargetImage','SourceImage','CommandLine','User',
                 'SubjectUserName','TargetUserName','ParentImage',
@@ -260,10 +257,9 @@ def full_dump(rec, offset):
         for k, v in rec.data.items():
             print(f"   {C.Y}{k:>{w}}{C.X} = {v}")
 
-# ---------- main ----------
 def main():
     ap = argparse.ArgumentParser(
-        description="Просмотр Windows .evtx на Linux (корректное чтение всех chunk'ов).",
+        description="Просмотр и триаж Windows .evtx (корректное чтение всех chunk'ов).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__)
     ap.add_argument('files', nargs='+', help='.evtx файл(ы), поддерживает маски (*.evtx)')
@@ -280,7 +276,6 @@ def main():
     ap.add_argument('--limit', type=int, help='показать не более N событий')
     args = ap.parse_args()
 
-    # раскрыть маски
     paths = []
     for f in args.files:
         paths.extend(sorted(glob.glob(f)) or [f])
@@ -290,7 +285,7 @@ def main():
     before = parse_dt(args.before) if args.before else None
     grep = args.grep.lower() if args.grep else None
 
-    all_rows = []  # для csv/json
+    all_rows = []
 
     for path in paths:
         try:
@@ -315,10 +310,8 @@ def main():
                 print(f"{path}: не EVTX или не удалось разобрать заголовок")
             continue
 
-        # разбор каждой записи один раз
         records = [parse_record(xml) for xml in recs]
 
-        # фильтрация
         sel = []
         for rec in records:
             if eid_filter and rec.eid not in eid_filter:

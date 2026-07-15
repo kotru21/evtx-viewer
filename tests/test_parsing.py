@@ -67,6 +67,16 @@ def test_to_local_offset():
     assert cli.to_local("", 3.0) == ""
 
 
+def test_to_local_bad_input_fallback():
+    # непарсимую строку возвращаем как есть (обрезав до 19 символов)
+    assert cli.to_local("не-дата-2026-xxxxxxxxxxxx", 3.0) == "не-дата-2026-xxxxxx"
+
+
+def test_get_record_id():
+    assert cli.get_record_id("<EventRecordID>13501</EventRecordID>") == 13501
+    assert cli.get_record_id("<Event/>") is None
+
+
 def test_parse_dt_formats():
     assert cli.parse_dt("2026-05-11 12:24") == datetime(2026, 5, 11, 12, 24, tzinfo=timezone.utc)
     assert cli.parse_dt("2026-05-11") == datetime(2026, 5, 11, tzinfo=timezone.utc)
