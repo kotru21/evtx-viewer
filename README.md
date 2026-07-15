@@ -23,6 +23,7 @@
 - **Проверка полноты** (`--verify`) — сверка с заголовками chunk'ов и поиск пропущенных `EventRecordID`; печатает `OK` или `!!! ОБРЕЗКА` со списком потерянных ID.
 - **Сводка** (`--summary`) — распределение EventID и диапазон времени; security-relevant EID подсвечены.
 - **Единый таймлайн** (`--timeline`) — события из нескольких `.evtx` сливаются в одну ленту, отсортированную по времени, с колонкой источника. Коррелирует Sysmon/Security/PowerShell в один поток.
+- **Пресеты** (`--preset`) — готовые представления под задачу. `process-tree` строит дерево процессов из Sysmon EID 1 (по `ProcessGuid`→`ParentProcessGuid`).
 - **Фильтры** — по EventID (`--eid`), по подстроке в сыром XML (`--grep`), по времени (`--after`/`--before`).
 - **Экспорт** — CSV и JSON с метаполями (`_EventID`, `_UTC`, `_Local`, `_Provider`, `_Computer`, `_SourceFile`) и всеми полями события.
 - **Устойчивый разбор** — `ElementTree` с namespace/атрибутами/многострочными значениями и декодированием XML-сущностей; fallback на регулярки для битого XML. Работает с форматом `UserData` (PrintService и др.), не только `EventData`.
@@ -96,6 +97,20 @@ $ evtxview Sysmon.evtx Security.evtx --timeline --after "2026-05-11 12:57:40" --
 2026-05-11 15:57:41  [Sysmon.evtx]    EID     5  Image=C:\Windows\System32\rdpclip.exe
 ```
 
+**5. Построить дерево процессов** — цепочка «родитель → потомок» из Sysmon EID 1 сразу вскрывает активность атакующего:
+
+```console
+$ evtxview Sysmon.evtx --preset process-tree
+Дерево процессов (Sysmon EID 1): 187 процессов, 25 корней
+
+15:25:10  cmd.exe (3188)  C:\Windows\system32\cmd.exe
+├─ 15:25:28  net.exe (568)  net user /domain
+├─ 15:26:03  net.exe (3740)  net user john 123123qwe /add
+│  └─ 15:26:03  net1.exe (2852)  C:\Windows\system32\net1 user john 123123qwe /add
+├─ 15:27:43  net.exe (992)  net localgroup Administrators john /add
+└─ 15:27:58  net.exe (888)  net localgroup "Remote Desktop Users" john /add
+```
+
 ## Опции
 
 | Флаг | Назначение |
@@ -105,6 +120,7 @@ $ evtxview Sysmon.evtx Security.evtx --timeline --after "2026-05-11 12:57:40" --
 | `--summary` | Сводка: распределение EventID и диапазон времени |
 | `--full` | Полный дамп всех полей каждого события |
 | `--timeline` | Единая лента из всех файлов, отсортированная по времени (колонка источника) |
+| `--preset process-tree` | Дерево процессов из Sysmon EID 1 (`ProcessGuid`→`ParentProcessGuid`) |
 | `--eid 1,3,1102` | Фильтр по EventID (через запятую) |
 | `--grep СТРОКА` | Фильтр: подстрока в сыром XML (регистронезависимо) |
 | `--after "YYYY-MM-DD HH:MM"` | События не раньше указанного времени (UTC) |
@@ -134,7 +150,7 @@ $ evtxview Sysmon.evtx Security.evtx --timeline --after "2026-05-11 12:57:40" --
 ## Ограничения и планы
 
 - Фильтры `--after`/`--before` принимают время только в UTC (флаг локального времени — в планах).
-- Готовые пресеты (`process-tree`, `logon-analysis`, `network`, `rdp`) — в планах.
+- Пресеты `logon-analysis`, `network`, `rdp` — в планах (готов `process-tree`).
 - Весь файл загружается в память списком; потоковый режим для многогигабайтных логов — в планах.
 - Набор security-relevant EventID и выбор полей для однострочной сводки заданы под Sysmon/Security; вынос в конфиг — в планах.
 
@@ -156,6 +172,7 @@ CI (GitHub Actions) прогоняет ruff, mypy и pytest на Windows и Linu
 | `reader.py` | Чтение `.evtx` и проверка полноты по заголовкам chunk'ов |
 | `record.py` | Модель `EventRecord` и разбор полей (ElementTree + regex-fallback) |
 | `render.py` | Форматирование вывода: цвета, сводка, однострочный/полный дамп |
+| `presets.py` | Пресеты анализа (`process-tree`, …) |
 | `export.py` | Экспорт в CSV/JSON |
 | `constants.py` | Наборы EID и приоритеты полей (кандидат на вынос в конфиг) |
 | `util.py` | Кодировка вывода, работа со временем |

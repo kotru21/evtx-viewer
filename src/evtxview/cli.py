@@ -22,6 +22,7 @@ import os
 from datetime import datetime
 
 from evtxview.export import export_row, write_csv, write_json
+from evtxview.presets import PRESETS
 from evtxview.reader import read_records, verify_completeness
 from evtxview.record import get_record_id, parse_record
 from evtxview.render import C, full_dump, print_summary, summarize_line
@@ -42,6 +43,7 @@ def build_parser():
     ap.add_argument('--summary', action='store_true', help='сводка: распределение EID и диапазон времени')
     ap.add_argument('--full', action='store_true', help='полный дамп всех полей каждого события')
     ap.add_argument('--timeline', action='store_true', help='единая лента из всех файлов, отсортированная по времени')
+    ap.add_argument('--preset', choices=sorted(PRESETS), help='готовое представление (например, process-tree)')
     ap.add_argument('--verify', action='store_true', help='сверка полноты парсинга (chunk-заголовки)')
     ap.add_argument('--csv', metavar='FILE', help='экспорт в CSV')
     ap.add_argument('--json', metavar='FILE', help='экспорт распарсенных событий в JSON')
@@ -119,7 +121,8 @@ def main():
     grep = args.grep.lower() if args.grep else None
 
     all_rows = []
-    timeline = []  # (path, rec) со всех файлов для --timeline
+    timeline = []      # (path, rec) со всех файлов для --timeline
+    preset_recs = []   # записи со всех файлов для --preset
 
     for path in paths:
         try:
@@ -134,6 +137,10 @@ def main():
 
         sel = filter_records((parse_record(x) for x in recs), eid_filter, grep, after, before)
 
+        if args.preset:
+            preset_recs.extend(sel)
+            continue
+
         if args.timeline:
             timeline.extend((path, rec) for rec in sel)
             continue
@@ -147,6 +154,9 @@ def main():
             continue
 
         render_events(((path, rec, None) for rec in sel), args, all_rows)
+
+    if args.preset:
+        PRESETS[args.preset](preset_recs, args.tz)
 
     if args.timeline:
         timeline.sort(key=lambda pr: (pr[1].utc == '', pr[1].utc))

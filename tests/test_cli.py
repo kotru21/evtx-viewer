@@ -158,6 +158,20 @@ def test_timeline_with_eid_filter(monkeypatch, capsys, security_evtx, printservi
     assert all("EID   823" in ln or "EID  4624" in ln for ln in lines)
 
 
+# ---------- пресеты (проводка через CLI) ----------
+def test_preset_process_tree_wiring(monkeypatch, capsys, security_evtx):
+    # в Security нет EID 1 — проверяем, что --preset доходит до пресета
+    out = run(monkeypatch, capsys, security_evtx, "--preset", "process-tree")
+    assert "Нет событий Sysmon EID 1" in out
+
+
+def test_preset_invalid_rejected(monkeypatch, capsys, security_evtx):
+    import pytest
+
+    with pytest.raises(SystemExit):
+        run(monkeypatch, capsys, security_evtx, "--preset", "nope")
+
+
 # ---------- полный дамп ----------
 def test_full_dump_output(monkeypatch, capsys, security_evtx):
     out = run(monkeypatch, capsys, security_evtx, "--eid", "1102", "--full")
