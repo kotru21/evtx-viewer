@@ -5,12 +5,14 @@ CLI для просмотра Windows `.evtx` на Linux. Написан в хо
 ## Установка
 
 ```bash
-pip install evtx --break-system-packages   # rust-based парсер (НЕ python-evtx!)
-chmod +x evtxview.py
-sudo cp evtxview.py /usr/local/bin/evtxview  # опционально, в PATH
+pip install -e .          # ставит evtxview + зависимость evtx, создаёт команду `evtxview`
+# для разработки (тесты, линт):
+pip install -e ".[dev]"
 ```
 
-Единственная зависимость — пакет `evtx` (rust-биндинг, класс `PyEvtxParser`). Стандартная библиотека Python для остального.
+После установки доступны оба варианта запуска — команда `evtxview ...` и `python -m evtxview ...`. Работает одинаково на Windows и Linux (вывод принудительно в UTF-8, чтобы кириллица не билась на Windows-консоли).
+
+Единственная runtime-зависимость — пакет `evtx` (rust-биндинг, класс `PyEvtxParser`). Всё остальное — стандартная библиотека Python.
 
 ## Что умеет сейчас
 
@@ -42,6 +44,8 @@ evtxview *.evtx --verify                          # проверить все н
 ```
 
 ## Архитектура (для навигации по коду)
+
+Весь код — в `src/evtxview/cli.py` (разбиение на модули запланировано в Фазе 1).
 
 - `read_records(path)` — читает все записи через `PyEvtxParser`, ловит `RuntimeError` на битых chunk'ах
 - `verify_completeness(path, got)` — ручной разбор заголовков chunk'ов (`ElfChnk\x00`, шаг 0x10000, поля first/last EventRecordID по offset 0x08/0x10) и сравнение суммы с прочитанным

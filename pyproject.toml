@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "evtxview"
+version = "0.1.0"
+description = "Корректный просмотр Windows .evtx на любой ОС — читает все chunk'и, проверяет полноту парсинга"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Arseni" }]
+keywords = ["evtx", "windows", "eventlog", "dfir", "forensics", "sysmon"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Topic :: System :: Logging",
+]
+dependencies = [
+    "evtx>=0.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "ruff>=0.4",
+    "mypy>=1.8",
+]
+
+[project.scripts]
+evtxview = "evtxview.cli:main"
+
+[project.urls]
+Repository = "https://github.com/kotru21/evtx-viewer"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/evtxview"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+# E402: force_utf8_output() намеренно вызывается до импорта evtx
+# E401/E702: компактный стиль автора (импорты и блок цветов) — рефактор в Фазе 1
+ignore = ["E402", "E401", "E702"]
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true

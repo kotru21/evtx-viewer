@@ -19,6 +19,20 @@ evtxview — удобный просмотр Windows .evtx на Linux.
 import argparse, sys, json, re, struct, csv, glob
 from datetime import datetime, timezone, timedelta
 
+# ---------- вывод в UTF-8 (иначе кириллица бьётся на Windows-консоли) ----------
+def force_utf8_output():
+    """Windows по умолчанию пишет stdout в кодировке локали (cp1251) — кириллица
+    превращается в мусор. Принудительно переключаем потоки на UTF-8."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, 'reconfigure', None)
+        if reconfigure:
+            try:
+                reconfigure(encoding='utf-8')
+            except (ValueError, OSError):
+                pass
+
+force_utf8_output()
+
 # ---------- зависимость ----------
 try:
     from evtx import PyEvtxParser
