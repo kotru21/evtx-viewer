@@ -135,6 +135,15 @@ def main():
         sys.exit("--csv/--json несовместимы с --summary/--preset: "
                   "эти режимы не строят построчную выборку событий для экспорта")
 
+    if args.verify and (args.eid or args.grep or args.after or args.before or args.tz_filter):
+        sys.exit("--verify проверяет полноту всего файла по заголовкам chunk'ов и не "
+                  "учитывает --eid/--grep/--after/--before/--tz-filter — уберите эти "
+                  "флаги или уберите --verify")
+
+    if args.tz_filter and not (args.after or args.before):
+        print(f"{C.Y}Предупреждение: --tz-filter без --after/--before ни на что не влияет{C.X}",
+              file=sys.stderr)
+
     config = load_config(args.config)
 
     paths = []

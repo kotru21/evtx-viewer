@@ -30,6 +30,33 @@ def test_verify_ok(monkeypatch, capsys, security_evtx):
     assert "прочитано=7" in out
 
 
+# ---------- --verify отклоняет несовместимые с ним фильтры ----------
+def test_verify_with_after_rejected(monkeypatch, capsys, security_evtx):
+    with pytest.raises(SystemExit):
+        run(monkeypatch, capsys, security_evtx, "--verify", "--after", "2026-05-11 12:50")
+
+
+def test_verify_with_eid_rejected(monkeypatch, capsys, security_evtx):
+    with pytest.raises(SystemExit):
+        run(monkeypatch, capsys, security_evtx, "--verify", "--eid", "1102")
+
+
+def test_verify_with_grep_rejected(monkeypatch, capsys, security_evtx):
+    with pytest.raises(SystemExit):
+        run(monkeypatch, capsys, security_evtx, "--verify", "--grep", "john")
+
+
+def test_verify_with_tz_filter_rejected(monkeypatch, capsys, security_evtx):
+    with pytest.raises(SystemExit):
+        run(monkeypatch, capsys, security_evtx, "--verify", "--tz-filter")
+
+
+def test_tz_filter_without_time_bounds_warns(monkeypatch, capsys, security_evtx):
+    monkeypatch.setattr("sys.argv", ["evtxview", security_evtx, "--tz-filter", "--summary"])
+    cli.main()
+    assert "--tz-filter без --after/--before" in capsys.readouterr().err
+
+
 def test_limit_caps_output(monkeypatch, capsys, security_evtx):
     out = run(monkeypatch, capsys, security_evtx, "--limit", "2")
     eid_lines = [ln for ln in out.splitlines() if ln.strip().startswith("2026")]

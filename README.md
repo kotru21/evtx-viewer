@@ -5,7 +5,7 @@
 [![CI](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
-![Tests](https://img.shields.io/badge/tests-104%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-114%20passing-brightgreen)
 [![Linting: Ruff](https://img.shields.io/badge/lint-ruff-261230)](https://github.com/astral-sh/ruff)
 ![Checked with mypy](https://img.shields.io/badge/mypy-checked-2a6db2)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -207,7 +207,7 @@ RDP-активность: 23 событий
 | Флаг | Назначение |
 |---|---|
 | `files...` | Один или несколько `.evtx`; поддерживаются маски (`*.evtx`) |
-| `--verify` | Проверка полноты чтения (chunk-заголовки + пропуски `EventRecordID`) |
+| `--verify` | Проверка полноты чтения (chunk-заголовки + пропуски `EventRecordID`). Проверяет весь файл — несовместим с `--eid`/`--grep`/`--after`/`--before`/`--tz-filter` |
 | `--summary` | Сводка: распределение EventID и диапазон времени |
 | `--full` | Полный дамп всех полей каждого события |
 | `--timeline` | Единая лента из всех файлов, отсортированная по времени (колонка источника) |
@@ -236,6 +236,8 @@ RDP-активность: 23 событий
 Прочитанные записи сверяются с обоими: несовпадение счётчика **или** дыра в диапазоне `EventRecordID` → `ОБРЕЗКА` с перечислением пропущенных ID. Пустые предвыделенные chunk'и (sentinel-заголовок `0xFFFF…FF`) не считаются потерей. Битые chunk'и не роняют разбор — они подсчитываются и выводятся как `chunk-errors: N`.
 
 Если сам заголовок chunk'а повреждён и объявляет неправдоподобно широкий диапазон ID (на порядки больше, чем бывает в реальных файлах), `--verify` не пытается перечислить пропуски в таком диапазоне — это дало бы либо ложный `OK`, либо попытку выделить память под нереальное число элементов. Вместо этого выводится явное предупреждение о повреждённом заголовке.
+
+`--verify` всегда проверяет файл целиком: заголовки chunk'ов описывают весь файл, а не отфильтрованную выборку, поэтому проверка полноты в принципе не может быть ограничена по `--eid`/`--grep`/`--after`/`--before`. Комбинация с любым из этих флагов (в том числе `--tz-filter`) отклоняется явной ошибкой — раньше фильтры в этом случае молча игнорировались, и `--verify` тихо проверял весь файл, хотя в выводе печаталась информация о применённом фильтре времени.
 
 ## Разбор полей
 

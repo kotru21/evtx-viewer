@@ -8,7 +8,18 @@ from pathlib import Path
 
 import pytest
 
+import evtxview.config as config_mod
+
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(autouse=True)
+def isolate_from_machine_config(monkeypatch, tmp_path):
+    """Тесты не должны зависеть от реального конфига машины, на которой они
+    запускаются: ни от $EVTXVIEW_CONFIG в окружении разработчика/CI, ни от
+    ~/.config/evtxview/config.toml, если он там случайно есть."""
+    monkeypatch.delenv("EVTXVIEW_CONFIG", raising=False)
+    monkeypatch.setattr(config_mod, "_default_config_path", lambda: tmp_path / "unused-config.toml")
 
 
 @pytest.fixture

@@ -39,6 +39,10 @@ class Config:
 
 DEFAULT_CONFIG = Config(hot_eids=DEFAULT_HOT_EIDS, summary_fields=DEFAULT_SUMMARY_FIELDS)
 
+_KNOWN_SECTIONS = {'highlight', 'summary'}
+_KNOWN_HIGHLIGHT_KEYS = {'hot_eids'}
+_KNOWN_SUMMARY_KEYS = {'fields'}
+
 
 def _default_config_path() -> Path:
     return Path.home() / '.config' / 'evtxview' / 'config.toml'
@@ -50,6 +54,25 @@ def _validate_str_list(value, key, path):
     return value
 
 
+def _get_table(data, key, path):
+    """Секция как dict. Если ключ есть, но это не таблица (`highlight = "x"`
+    вместо `[highlight]`) — явная ошибка, а не попытка проиндексировать
+    не-словарь дальше по коду (см. #22)."""
+    value = data.get(key, {})
+    if not isinstance(value, dict):
+        sys.exit(f"{path}: секция '[{key}]' должна быть таблицей TOML "
+                  f"(получено {type(value).__name__})")
+    return value
+
+
+def _warn_unknown(present, known, label, path):
+    """Опечатка в ключе/секции иначе тихо не применяется — пользователь
+    решит, что оверрайд сработал, хотя применились дефолты (см. #23)."""
+    for key in sorted(set(present) - known):
+        print(f"evtxview: предупреждение — {path}: неизвестный ключ "
+              f"'{label}.{key}' проигнорирован", file=sys.stderr)
+
+
 def load_config(explicit_path: Optional[str] = None) -> Config:
     """Загружает конфиг и мержит его поверх встроенных дефолтов.
 
@@ -58,7 +81,12 @@ def load_config(explicit_path: Optional[str] = None) -> Config:
     путь не указан явно и файл по умолчанию не существует — тихо используются
     дефолты (это ожидаемый случай для большинства запусков). Если путь указан
     явно (--config / EVTXVIEW_CONFIG), но файла нет или TOML битый — ошибка,
-    а не молчаливый откат на дефолты.
+    а не молчаливый откат на дефолты. Секция, объявленная не таблицей
+    (`highlight = "x"` вместо `[highlight]`), — тоже ошибка. Неизвестные
+    секции/ключи (например, опечатка `hot_eid` вместо `hot_eids`) не роняют
+    загрузку, но печатают предупреждение в stderr — иначе опечатка тихо
+    игнорируется, и оверрайд, который пользователь считает применённым,
+    на деле не срабатывает.
 
     В самом TOML каждый ключ, если присутствует, ПОЛНОСТЬЮ заменяет
     соответствующий дефолт (а не дополняет его):
@@ -84,14 +112,18 @@ def load_config(explicit_path: Optional[str] = None) -> Config:
     except tomllib.TOMLDecodeError as e:
         sys.exit(f"{path}: некорректный TOML — {e}")
 
+    _warn_unknown(data.keys(), _KNOWN_SECTIONS, 'config', path)
+
     hot_eids = DEFAULT_CONFIG.hot_eids
     summary_fields = DEFAULT_CONFIG.summary_fields
 
-    highlight = data.get('highlight', {})
+    highlight = _get_table(data, 'highlight', path)
+    _warn_unknown(highlight.keys(), _KNOWN_HIGHLIGHT_KEYS, 'highlight', path)
     if 'hot_eids' in highlight:
         hot_eids = frozenset(_validate_str_list(highlight['hot_eids'], 'highlight.hot_eids', path))
 
-    summary = data.get('summary', {})
+    summary = _get_table(data, 'summary', path)
+    _warn_unknown(summary.keys(), _KNOWN_SUMMARY_KEYS, 'summary', path)
     if 'fields' in summary:
         summary_fields = tuple(_validate_str_list(summary['fields'], 'summary.fields', path))
 

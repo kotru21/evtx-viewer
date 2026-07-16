@@ -1,14 +1,14 @@
-"""Тесты загрузки и мержа конфига (TODO #5)."""
+"""Тесты загрузки и мержа конфига (TODO #5).
+
+Изоляция от реального конфига машины (env var, ~/.config/...) обеспечена
+autouse-фикстурой isolate_from_machine_config в conftest.py.
+"""
 import pytest
 
-import evtxview.config as config_mod
 from evtxview.config import DEFAULT_CONFIG, load_config
 
 
-def test_no_config_returns_defaults(monkeypatch, tmp_path):
-    # путь по умолчанию указывает в пустой каталог — файла там нет
-    monkeypatch.setattr(config_mod, "_default_config_path", lambda: tmp_path / "config.toml")
-    monkeypatch.delenv("EVTXVIEW_CONFIG", raising=False)
+def test_no_config_returns_defaults():
     cfg = load_config(None)
     assert cfg == DEFAULT_CONFIG
 
@@ -90,3 +90,48 @@ def test_explicit_path_wins_over_env_var(monkeypatch, tmp_path):
     monkeypatch.setenv("EVTXVIEW_CONFIG", str(env_cfg))
     cfg = load_config(str(explicit_cfg))
     assert cfg.hot_eids == frozenset({"2222"})
+
+
+# ---------- секция объявлена не таблицей (#22) ----------
+def test_section_as_scalar_raises_clear_error(tmp_path):
+    """`highlight = "x"` вместо `[highlight]` — раньше падало сырым
+    TypeError при попытке проиндексировать строку как словарь."""
+    cfg_file = tmp_path / "cfg.toml"
+    cfg_file.write_text('highlight = "hot_eids"\n', encoding="utf-8")
+    with pytest.raises(SystemExit, match="должна быть таблицей TOML"):
+        load_config(str(cfg_file))
+
+
+def test_section_as_list_raises_clear_error(tmp_path):
+    cfg_file = tmp_path / "cfg.toml"
+    cfg_file.write_text('summary = ["a", "b"]\n', encoding="utf-8")
+    with pytest.raises(SystemExit, match="должна быть таблицей TOML"):
+        load_config(str(cfg_file))
+
+
+# ---------- неизвестные ключи/секции — предупреждение, не тишина (#23) ----------
+def test_unknown_key_in_highlight_warns_and_keeps_default(tmp_path, capsys):
+    cfg_file = tmp_path / "cfg.toml"
+    cfg_file.write_text('[highlight]\nhot_eid = ["1102"]\n', encoding="utf-8")  # опечатка: hot_eid
+    cfg = load_config(str(cfg_file))
+    assert cfg.hot_eids == DEFAULT_CONFIG.hot_eids  # оверрайд не сработал
+    err = capsys.readouterr().err
+    assert "highlight.hot_eid" in err
+    assert "проигнорирован" in err
+
+
+def test_unknown_top_level_section_warns(tmp_path, capsys):
+    cfg_file = tmp_path / "cfg.toml"
+    cfg_file.write_text('[higlight]\nhot_eids = ["1102"]\n', encoding="utf-8")  # опечатка: higlight
+    cfg = load_config(str(cfg_file))
+    assert cfg == DEFAULT_CONFIG
+    err = capsys.readouterr().err
+    assert "config.higlight" in err
+
+
+def test_known_config_produces_no_warnings(tmp_path, capsys):
+    cfg_file = tmp_path / "cfg.toml"
+    cfg_file.write_text('[highlight]\nhot_eids = ["1102"]\n\n[summary]\nfields = ["Image"]\n',
+                         encoding="utf-8")
+    load_config(str(cfg_file))
+    assert capsys.readouterr().err == ""
