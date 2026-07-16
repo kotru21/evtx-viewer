@@ -10,6 +10,14 @@ except ImportError:
 
 EMPTY = 0xFFFFFFFFFFFFFFFF  # sentinel в заголовке предвыделенного пустого chunk'а
 
+# Верхняя граница правдоподобного диапазона EventRecordID в одном файле.
+# Реальные .evtx на многие гигабайты не превышают десятков миллионов записей;
+# значение на порядки выше — признак повреждённого (или сфабрикованного)
+# заголовка chunk'а, а не легитимного файла. Без этой проверки
+# set(range(id_lo, id_hi + 1)) на битом заголовке может попытаться
+# материализовать диапазон в ~10**19 элементов и уронить процесс по памяти.
+MAX_PLAUSIBLE_ID_RANGE = 50_000_000
+
 
 def read_records(path):
     """Читает все записи, не падая на битых chunk'ах.
@@ -58,10 +66,17 @@ def verify_completeness(path, seen_ids):
     seen = {i for i in seen_ids if i is not None}
     got = len(seen)
     missing = []
+    range_unreliable = False
     if id_lo is not None and id_hi is not None:
-        missing = sorted(set(range(id_lo, id_hi + 1)) - seen)
-    complete = (got == expected) and not missing
+        if id_hi - id_lo + 1 > MAX_PLAUSIBLE_ID_RANGE:
+            # заголовок явно повреждён — не пытаемся перечислить пропуски,
+            # но и не выдаём ложный OK: диапазону из такого заголовка нельзя доверять
+            range_unreliable = True
+        else:
+            missing = sorted(set(range(id_lo, id_hi + 1)) - seen)
+    complete = (got == expected) and not missing and not range_unreliable
     return {
         'chunks': chunks, 'expected': expected, 'got': got,
         'id_lo': id_lo, 'id_hi': id_hi, 'missing': missing, 'complete': complete,
+        'range_unreliable': range_unreliable,
     }

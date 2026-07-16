@@ -82,6 +82,11 @@ def print_verify(path, recs, errs):
     mark = f"{C.G}OK{C.X}" if v['complete'] else f"{C.R}!!! ОБРЕЗКА{C.X}"
     print(f"{C.BOLD}{path}{C.X}: chunks={v['chunks']} заявлено={v['expected']} "
           f"прочитано={v['got']} {mark}" + (f" (chunk-errors: {errs})" if errs else ""))
+    if v['range_unreliable']:
+        print(f"  {C.R}заголовок chunk'а повреждён: диапазон EventRecordID "
+              f"({v['id_lo']}..{v['id_hi']}) неправдоподобно широк — "
+              f"проверка пропусков невозможна{C.X}")
+        return
     miss = v['missing']
     if miss:
         sample = ', '.join(str(i) for i in miss[:15])

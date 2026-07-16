@@ -67,6 +67,43 @@ def test_verify_not_evtx(tmp_path):
     assert verify_completeness(str(junk), 0) is None
 
 
+def _fake_evtx_with_chunk_header(num_first, num_last, rec_first, rec_last):
+    """Минимальный .evtx-подобный файл с одним chunk-заголовком по заданным
+    полям — для тестирования verify_completeness без реального парсера."""
+    import struct
+
+    header = b'ElfFile\x00' + b'\x00' * (0x1000 - 8)
+    chunk = (
+        b'ElfChnk\x00'
+        + struct.pack('<Q', num_first) + struct.pack('<Q', num_last)
+        + struct.pack('<Q', rec_first) + struct.pack('<Q', rec_last)
+    )
+    return header + chunk + b'\x00' * 0x10
+
+
+def test_verify_rejects_implausible_id_range(tmp_path):
+    """Повреждённый (не-sentinel) заголовок с чудовищным диапазоном ID не должен
+    приводить к попытке материализовать range() на ~10**19 элементов — только
+    к пометке диапазона как ненадёжного."""
+    fake = tmp_path / "corrupt.evtx"
+    fake.write_bytes(_fake_evtx_with_chunk_header(1, 5, 0, 0xFFFFFFFFFFFFFFFE))
+    v = verify_completeness(str(fake), [])
+    assert v is not None
+    assert v["range_unreliable"] is True
+    assert v["complete"] is False
+    assert v["missing"] == []  # не перечисляем — диапазону нельзя доверять
+
+
+def test_verify_normal_range_still_enumerates(tmp_path):
+    """Контроль: правдоподобный диапазон по-прежнему сверяется как раньше."""
+    fake = tmp_path / "normal.evtx"
+    fake.write_bytes(_fake_evtx_with_chunk_header(1, 5, 100, 104))
+    v = verify_completeness(str(fake), [100, 101, 103, 104])
+    assert v["range_unreliable"] is False
+    assert v["missing"] == [102]
+    assert v["complete"] is False
+
+
 def test_printservice_userdata(printservice_evtx):
     recs, errs = read_records(printservice_evtx)
     assert len(recs) == 4
