@@ -5,7 +5,7 @@
 [![CI](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
-![Tests](https://img.shields.io/badge/tests-64%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-72%20passing-brightgreen)
 [![Linting: Ruff](https://img.shields.io/badge/lint-ruff-261230)](https://github.com/astral-sh/ruff)
 ![Checked with mypy](https://img.shields.io/badge/mypy-checked-2a6db2)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -27,7 +27,7 @@
 - **Проверка полноты** (`--verify`) — сверка с заголовками chunk'ов и поиск пропущенных `EventRecordID`; печатает `OK` или `!!! ОБРЕЗКА` со списком потерянных ID.
 - **Сводка** (`--summary`) — распределение EventID и диапазон времени; security-relevant EID подсвечены.
 - **Единый таймлайн** (`--timeline`) — события из нескольких `.evtx` сливаются в одну ленту, отсортированную по времени, с колонкой источника. Коррелирует Sysmon/Security/PowerShell в один поток.
-- **Пресеты** (`--preset`) — готовые представления под задачу. `process-tree` строит дерево процессов из Sysmon EID 1 (по `ProcessGuid`→`ParentProcessGuid`); `logon-analysis` разбирает входы Security (сессии 4624→4634, привилегированные логоны 4672, признаки brute-force по 4625).
+- **Пресеты** (`--preset`) — готовые представления под задачу. `process-tree` строит дерево процессов из Sysmon EID 1 (по `ProcessGuid`→`ParentProcessGuid`); `logon-analysis` разбирает входы Security (сессии 4624→4634, привилегированные логоны 4672, признаки brute-force по 4625); `network` группирует соединения Sysmon EID 3 по назначению, выводя необычные порты и исходящий с хоста трафик первыми.
 - **Фильтры** — по EventID (`--eid`), по подстроке в сыром XML (`--grep`), по времени (`--after`/`--before`).
 - **Экспорт** — CSV и JSON с метаполями (`_EventID`, `_UTC`, `_Local`, `_Provider`, `_Computer`, `_SourceFile`) и всеми полями события.
 - **Устойчивый разбор** — `ElementTree` с namespace/атрибутами/многострочными значениями и декодированием XML-сущностей; fallback на регулярки для битого XML. Работает с форматом `UserData` (PrintService и др.), не только `EventData`.
@@ -165,6 +165,24 @@ vm1-PC\vm1  (2 вход(ов))
 
 Сессии строятся парой 4624→4634 по `TargetLogonId` (длительность считается из совпавшей пары); вход помечается `[privileged: 4672]`, если по тому же `LogonId` было выдано специальное право. При наличии неудачных входов (4625) выводится их список и, если по одной учётке или IP набирается 5+ неудач за 5 минут, — предупреждение о вероятном brute-force.
 
+**7. Разобрать сетевую активность** — соединения Sysmon EID 3, сгруппированные по назначению; необычные порты и исходящие с хоста соединения — первыми:
+
+```console
+$ evtxview Sysmon.evtx --preset network
+Сетевые соединения (Sysmon EID 3): 518 событий, 36 назначений
+
+10.10.10.20:7070  (47 соедин., 15:17:07..15:18:57)  [необычный порт]
+    процессы: AnyDesk.exe
+10.10.10.1:22  (6 соедин., 16:00:48..16:00:52)  [необычный порт, исходящее с этого хоста (6)]
+    процессы: nmap.exe
+10.8.0.2:4444  (1 соедин., 15:24:56..15:24:56)  [необычный порт, исходящее с этого хоста (1)]
+    процессы: spoolsv.exe
+10.10.10.1:161  (1 соедин., 15:31:42..15:31:42)  [исходящее с этого хоста (1)]
+    процессы: advanced_ip_scanner.exe
+```
+
+Группировка — по `DestinationIp:Port`. «Необычный порт» — не входит в общеизвестные (DNS/RPC/SMB/RDP/…) и не из динамического RPC-диапазона (`49152+`, обычные callback-порты после негоциации через порт 135 — не помечаются, чтобы не заваливать вывод шумом). «Исходящее с этого хоста» — `Initiated=true`, то есть соединение инициировал сам хост, а не принял: как раз так выглядит recon и удалённый доступ атакующего на фоне обычного фонового трафика ОС.
+
 ## Опции
 
 | Флаг | Назначение |
@@ -176,6 +194,7 @@ vm1-PC\vm1  (2 вход(ов))
 | `--timeline` | Единая лента из всех файлов, отсортированная по времени (колонка источника) |
 | `--preset process-tree` | Дерево процессов из Sysmon EID 1 (`ProcessGuid`→`ParentProcessGuid`) |
 | `--preset logon-analysis` | Сессии, привилегированные входы и brute-force из Security 4624/4625/4634/4672 |
+| `--preset network` | Соединения Sysmon EID 3, сгруппированные по назначению; необычные порты и исходящие с хоста — первыми |
 | `--eid 1,3,1102` | Фильтр по EventID (через запятую) |
 | `--grep СТРОКА` | Фильтр: подстрока в сыром XML (регистронезависимо) |
 | `--after "YYYY-MM-DD HH:MM"` | События не раньше указанного времени (UTC) |
@@ -207,7 +226,7 @@ vm1-PC\vm1  (2 вход(ов))
 ## Ограничения и планы
 
 - Фильтры `--after`/`--before` принимают время только в UTC (флаг локального времени — в планах).
-- Пресеты `network`, `rdp` — в планах (готовы `process-tree`, `logon-analysis`).
+- Пресет `rdp` — в планах (готовы `process-tree`, `logon-analysis`, `network`).
 - Весь файл загружается в память списком; потоковый режим для многогигабайтных логов — в планах.
 - Набор security-relevant EventID и выбор полей для однострочной сводки заданы под Sysmon/Security; вынос в конфиг — в планах.
 

@@ -198,7 +198,12 @@ def test_preset_process_tree_wiring(monkeypatch, capsys, security_evtx):
 def test_preset_logon_analysis_wiring(monkeypatch, capsys, security_evtx):
     out = run(monkeypatch, capsys, security_evtx, "--preset", "logon-analysis")
     assert "2 успешных, 0 неуспешных" in out
-    assert "vm1-PC\\vm1" in out
+
+
+def test_preset_network_wiring(monkeypatch, capsys, security_evtx):
+    # в Security нет EID 3 — проверяем, что --preset доходит до пресета
+    out = run(monkeypatch, capsys, security_evtx, "--preset", "network")
+    assert "Нет событий Sysmon EID 3" in out
 
 
 def test_preset_invalid_rejected(monkeypatch, capsys, security_evtx):

@@ -173,7 +173,76 @@ def logon_analysis(records, tz):
         _detect_brute_force(failures)
 
 
+# Порты, дающие фоновый шум Windows-хоста (DNS, RPC/SMB, NetBIOS, RDP, LDAP,
+# discovery-протоколы, WinRM). Соединения вне этого набора — на порядок реже
+# и заслуживают внимания в первую очередь.
+COMMON_PORTS = {
+    '53', '80', '88', '110', '123', '135', '137', '138', '139', '143',
+    '161', '389', '443', '445', '636', '993', '995', '1900', '3268',
+    '3269', '3389', '3702', '5353', '5355', '5985', '5986',
+}
+
+
+def _dst_key(rec):
+    return f"{rec.data.get('DestinationIp', '?')}:{rec.data.get('DestinationPort', '?')}"
+
+
+def _is_unusual_port(port):
+    """Не входит в общеизвестные, и не из динамического RPC-диапазона
+    (>=49152 — обычные callback-порты после негоциации через DCOM/135)."""
+    if port in COMMON_PORTS:
+        return False
+    return not (port.isdigit() and int(port) >= 49152)
+
+
+def _is_notable(dst, recs):
+    """Необычный порт или хоть одно исходящее с этого хоста соединение —
+    более вероятный признак действий атакующего, чем фоновый ОС-трафик."""
+    port = dst.rsplit(':', 1)[-1]
+    return _is_unusual_port(port) or any(r.data.get('Initiated') == 'true' for r in recs)
+
+
+def network(records, tz):
+    """Сетевые соединения из Sysmon EID 3, сгруппированные по назначению
+    (DestinationIp:Port): количество, инициирующие процессы, окно времени.
+
+    Группы с нестандартным портом или исходящим (Initiated=true) соединением
+    печатаются первыми — именно так выглядит recon/удалённый доступ
+    атакующего (nmap, ip-сканеры, AnyDesk и т.п.) на фоне обычного трафика.
+    """
+    conns = [r for r in records if r.eid == '3']
+    if not conns:
+        print("  Нет событий Sysmon EID 3 (NetworkConnect) в выборке.")
+        return
+
+    groups = defaultdict(list)
+    for r in conns:
+        groups[_dst_key(r)].append(r)
+
+    print(f"{C.BOLD}Сетевые соединения (Sysmon EID 3){C.X}: "
+          f"{len(conns)} событий, {len(groups)} назначений\n")
+
+    for dst in sorted(groups, key=lambda k: (not _is_notable(k, groups[k]), -len(groups[k]))):
+        recs = groups[dst]
+        port = dst.rsplit(':', 1)[-1]
+        images = sorted({os.path.basename(r.data.get('Image') or '?') for r in recs})
+        times = sorted(r.utc for r in recs if r.utc)
+        outbound = sum(1 for r in recs if r.data.get('Initiated') == 'true')
+        span = f"{to_local(times[0], tz)[11:]}..{to_local(times[-1], tz)[11:]}" if times else '?'
+
+        flags = []
+        if _is_unusual_port(port):
+            flags.append(f'{C.R}необычный порт{C.X}')
+        if outbound:
+            flags.append(f'{C.Y}исходящее с этого хоста ({outbound}){C.X}')
+        flag_str = '  [' + ', '.join(flags) + ']' if flags else ''
+
+        print(f"{C.CY}{dst}{C.X}  ({len(recs)} соедин., {span}){flag_str}")
+        print(f"    процессы: {', '.join(images)}")
+
+
 PRESETS = {
     'process-tree': process_tree,
     'logon-analysis': logon_analysis,
+    'network': network,
 }

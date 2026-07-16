@@ -1,6 +1,6 @@
 """Тесты пресетов анализа."""
 from evtxview.record import EventRecord
-from evtxview.presets import logon_analysis, process_tree
+from evtxview.presets import logon_analysis, network, process_tree
 
 
 def proc(guid, pguid, image, pid, utc, cmd=""):
@@ -140,3 +140,72 @@ def test_logon_analysis_empty(capsys):
     logon_analysis(records, tz=0)
     out = capsys.readouterr().out
     assert "Нет событий входа" in out
+
+
+# ---------- network ----------
+def conn(utc, dst_ip, dst_port, image, initiated="false", src_ip="10.8.0.2"):
+    return EventRecord(
+        xml="", eid="3", utc=utc,
+        data={"DestinationIp": dst_ip, "DestinationPort": dst_port,
+              "Image": image, "Initiated": initiated, "SourceIp": src_ip},
+    )
+
+
+def test_network_groups_by_destination(capsys):
+    records = [
+        conn("2026-05-11T12:00:00Z", "10.10.10.20", "3389", r"C:\Windows\svchost.exe"),
+        conn("2026-05-11T12:00:05Z", "10.10.10.20", "3389", r"C:\Windows\svchost.exe"),
+    ]
+    network(records, tz=0)
+    out = capsys.readouterr().out
+    assert "2 событий, 1 назначений" in out
+    assert "10.10.10.20:3389" in out
+    assert "2 соедин." in out
+    assert "svchost.exe" in out
+
+
+def test_network_flags_unusual_port(capsys):
+    records = [conn("2026-05-11T12:00:00Z", "203.0.113.5", "4444", r"C:\Windows\spoolsv.exe")]
+    network(records, tz=0)
+    out = capsys.readouterr().out
+    assert "необычный порт" in out
+
+
+def test_network_does_not_flag_common_port(capsys):
+    records = [conn("2026-05-11T12:00:00Z", "10.10.10.20", "445", "System")]
+    network(records, tz=0)
+    out = capsys.readouterr().out
+    assert "необычный порт" not in out
+
+
+def test_network_does_not_flag_dynamic_rpc_port(capsys):
+    # 49152+ — динамический RPC-диапазон после негоциации через 135, не аномалия
+    records = [conn("2026-05-11T12:00:00Z", "10.10.10.20", "49200", "lsass.exe")]
+    network(records, tz=0)
+    out = capsys.readouterr().out
+    assert "необычный порт" not in out
+
+
+def test_network_flags_outbound_direction(capsys):
+    records = [conn("2026-05-11T12:00:00Z", "10.10.10.1", "22", "nmap.exe", initiated="true")]
+    network(records, tz=0)
+    out = capsys.readouterr().out
+    assert "исходящее с этого хоста (1)" in out
+
+
+def test_network_notable_sorted_first(capsys):
+    # частый легитимный трафик (RDP, много соединений) не должен вытеснить
+    # редкое, но заметное необычным портом соединение из верхней части вывода
+    records = [conn(f"2026-05-11T12:00:{i:02d}Z", "10.10.10.20", "3389", "svchost.exe")
+               for i in range(20)]
+    records.append(conn("2026-05-11T12:05:00Z", "10.10.10.1", "22", "nmap.exe", initiated="true"))
+    network(records, tz=0)
+    out = capsys.readouterr().out
+    assert out.index("10.10.10.1:22") < out.index("10.10.10.20:3389")
+
+
+def test_network_empty(capsys):
+    records = [EventRecord(xml="", eid="1", utc="2026-05-11T12:00:00Z")]
+    network(records, tz=0)
+    out = capsys.readouterr().out
+    assert "Нет событий Sysmon EID 3" in out
