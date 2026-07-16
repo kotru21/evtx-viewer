@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from evtxview.constants import HOT_EID
+from evtxview.config import DEFAULT_HOT_EIDS as HOT_EID
 from evtxview.record import (
     get_data_fields, get_eid, get_provider, get_computer, get_record_id,
     get_utc, parse_record,

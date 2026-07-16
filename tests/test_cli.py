@@ -236,6 +236,38 @@ def test_preset_invalid_rejected(monkeypatch, capsys, security_evtx):
         run(monkeypatch, capsys, security_evtx, "--preset", "nope")
 
 
+# ---------- --config ----------
+def test_config_narrows_hot_eids(monkeypatch, capsys, tmp_path, security_evtx):
+    cfg = tmp_path / "cfg.toml"
+    cfg.write_text('[highlight]\nhot_eids = ["1102"]\n', encoding="utf-8")
+    out = run(monkeypatch, capsys, security_evtx, "--summary", "--config", str(cfg))
+    lines = out.splitlines()
+    line_1102 = next(ln for ln in lines if ln.strip().startswith("1102"))
+    line_4624 = next(ln for ln in lines if ln.strip().startswith("4624"))
+    assert "security-relevant" in line_1102
+    assert "security-relevant" not in line_4624
+
+
+def test_config_overrides_summary_fields(monkeypatch, capsys, tmp_path, security_evtx):
+    cfg = tmp_path / "cfg.toml"
+    cfg.write_text('[summary]\nfields = ["SubjectUserName"]\n', encoding="utf-8")
+    out = run(monkeypatch, capsys, security_evtx, "--eid", "1102", "--config", str(cfg))
+    assert "SubjectUserName=john" in out
+
+
+def test_config_missing_explicit_file_rejected(monkeypatch, capsys, tmp_path, security_evtx):
+    missing = tmp_path / "nope.toml"
+    with pytest.raises(SystemExit):
+        run(monkeypatch, capsys, security_evtx, "--config", str(missing))
+
+
+def test_config_malformed_toml_rejected(monkeypatch, capsys, tmp_path, security_evtx):
+    bad = tmp_path / "bad.toml"
+    bad.write_text("not [valid", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        run(monkeypatch, capsys, security_evtx, "--config", str(bad))
+
+
 # ---------- полный дамп ----------
 def test_full_dump_output(monkeypatch, capsys, security_evtx):
     out = run(monkeypatch, capsys, security_evtx, "--eid", "1102", "--full")

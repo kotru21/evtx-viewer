@@ -5,7 +5,7 @@
 [![CI](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
-![Tests](https://img.shields.io/badge/tests-89%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-104%20passing-brightgreen)
 [![Linting: Ruff](https://img.shields.io/badge/lint-ruff-261230)](https://github.com/astral-sh/ruff)
 ![Checked with mypy](https://img.shields.io/badge/mypy-checked-2a6db2)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -33,6 +33,7 @@
 - **Устойчивый разбор** — `ElementTree` с namespace/атрибутами/многострочными значениями и декодированием XML-сущностей; fallback на регулярки для битого XML. Работает с форматом `UserData` (PrintService и др.), не только `EventData`.
 - **Несколько файлов сразу** — маски (`*.evtx`) раскрываются, каждый файл в своей секции.
 - **Кросс-платформенность** — Windows и Linux, корректный UTF-8 вывод. Цвет — только в терминале.
+- **Настраиваемый конфиг** (`--config`) — набор security-relevant EventID и приоритет полей для сводки заданы под Sysmon/Security по умолчанию, но переопределяются TOML-файлом под других провайдеров.
 
 ## Установка
 
@@ -223,6 +224,7 @@ RDP-активность: 23 событий
 | `--csv FILE` | Экспорт отобранных событий в CSV. Несовместим с `--summary`/`--preset` (они не строят построчную выборку) |
 | `--json FILE` | Экспорт отобранных событий в JSON. Те же ограничения, что у `--csv` |
 | `--limit N` | Показать в терминале не более N событий. На `--csv`/`--json` не влияет — экспорт всегда содержит все отобранные события |
+| `--config FILE` | TOML-конфиг с наборами `hot_eids`/полей сводки (иначе: `$EVTXVIEW_CONFIG`, `~/.config/evtxview/config.toml`, встроенные дефолты) |
 
 ## Проверка полноты
 
@@ -239,6 +241,22 @@ RDP-активность: 23 событий
 
 Каждая запись парсится один раз (`parse_record`) в модель `EventRecord`. Основной путь — `ElementTree`: корректно обрабатывает namespace, атрибуты, многострочные значения и декодирует XML-сущности (`&lt;` → `<`). На нестандартно оформленном или битом XML происходит откат на разбор регулярными выражениями, чтобы не потерять запись целиком.
 
+## Конфигурация
+
+По умолчанию инструмент подсвечивает как security-relevant набор EventID, характерный для Sysmon/Security, и выбирает те же провайдер-специфичные поля для однострочной сводки (`Image`, `CommandLine`, `IpAddress`, ...). Оба набора переопределяются через TOML — полезно, если вы работаете преимущественно с другими провайдерами (Exchange, IIS, кастомные приложения) и хотите подсветку под них.
+
+```toml
+# ~/.config/evtxview/config.toml (или любой путь через --config / $EVTXVIEW_CONFIG)
+
+[highlight]
+hot_eids = ["1102", "4624", "4625", "4672"]
+
+[summary]
+fields = ["Image", "CommandLine", "TargetUserName"]
+```
+
+Порядок поиска: `--config PATH` → `$EVTXVIEW_CONFIG` → `~/.config/evtxview/config.toml` → встроенные дефолты. Каждая секция, если присутствует в файле, **полностью заменяет** соответствующий дефолт (не дополняет его). Если файл указан явно (флагом или переменной окружения) и не найден или содержит битый TOML — программа завершается с понятной ошибкой, а не молча откатывается на дефолты; путь по умолчанию (`~/.config/...`), если его нет, просто пропускается.
+
 ## Кросс-валидация
 
 На критичных артефактах полезно сверять результат с независимым инструментом — [`EvtxECmd`](https://ericzimmerman.github.io/) (Eric Zimmerman) или нативным `wevtutil`. Расхождение в числе записей сразу видно и указывает на проблему в одном из парсеров.
@@ -246,6 +264,7 @@ RDP-активность: 23 событий
 ## Ограничения и планы
 
 - Все четыре запланированных пресета готовы: `process-tree`, `logon-analysis`, `network`, `rdp`.
+- Конфигурируемы пока только `hot_eids` и поля сводки; наборы полей внутри самих пресетов (`LOGON_TYPE_NAMES`, `COMMON_PORTS` и т.п.) остаются захардкоженными — расширение конфига на них не планировалось в этой итерации.
 - Весь файл загружается в память списком; потоковый режим для многогигабайтных логов — в планах.
 - Набор security-relevant EventID и выбор полей для однострочной сводки заданы под Sysmon/Security; вынос в конфиг — в планах.
 
@@ -267,9 +286,9 @@ CI (GitHub Actions) прогоняет ruff, mypy и pytest на Windows и Linu
 | `reader.py` | Чтение `.evtx` и проверка полноты по заголовкам chunk'ов |
 | `record.py` | Модель `EventRecord` и разбор полей (ElementTree + regex-fallback) |
 | `render.py` | Форматирование вывода: цвета, сводка, однострочный/полный дамп |
-| `presets.py` | Пресеты анализа (`process-tree`, …) |
+| `presets.py` | Пресеты анализа (`process-tree`, `logon-analysis`, `network`, `rdp`) |
 | `export.py` | Экспорт в CSV/JSON |
-| `constants.py` | Наборы EID и приоритеты полей (кандидат на вынос в конфиг) |
+| `config.py` | Дефолты `hot_eids`/полей сводки + загрузка и мерж пользовательского TOML |
 | `util.py` | Кодировка вывода, работа со временем |
 | `cli.py` | Разбор аргументов и оркестрация |
 

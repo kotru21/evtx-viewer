@@ -21,6 +21,7 @@ import glob
 import os
 import sys
 
+from evtxview.config import load_config
 from evtxview.export import export_row, write_csv, write_json
 from evtxview.presets import PRESETS
 from evtxview.reader import read_records, verify_completeness
@@ -51,6 +52,8 @@ def build_parser():
     ap.add_argument('--csv', metavar='FILE', help='экспорт в CSV')
     ap.add_argument('--json', metavar='FILE', help='экспорт распарсенных событий в JSON')
     ap.add_argument('--limit', type=int, help='показать не более N событий')
+    ap.add_argument('--config', metavar='FILE', help='TOML-конфиг с наборами hot_eids/summary-полей '
+                     '(иначе: $EVTXVIEW_CONFIG, ~/.config/evtxview/config.toml, встроенные дефолты)')
     return ap
 
 
@@ -95,7 +98,7 @@ def print_verify(path, recs, errs):
               f"  [{sample}{more}]  (диапазон {v['id_lo']}..{v['id_hi']})")
 
 
-def render_events(items, args, all_rows):
+def render_events(items, args, all_rows, config):
     """Печать событий (одной строкой или --full) с учётом --limit.
 
     --limit ограничивает только то, что печатается в терминал. Экспорт в
@@ -118,9 +121,9 @@ def render_events(items, args, all_rows):
                 break
             continue
         if args.full:
-            full_dump(rec, args.tz, source=source)
+            full_dump(rec, args.tz, source=source, config=config)
         else:
-            print(summarize_line(rec, args.tz, source=source))
+            print(summarize_line(rec, args.tz, source=source, config=config))
         shown += 1
 
 
@@ -131,6 +134,8 @@ def main():
     if (args.summary or args.preset) and (args.csv or args.json):
         sys.exit("--csv/--json несовместимы с --summary/--preset: "
                   "эти режимы не строят построчную выборку событий для экспорта")
+
+    config = load_config(args.config)
 
     paths = []
     for f in args.files:
@@ -180,10 +185,10 @@ def main():
                   + (f", chunk-errors {errs}" if errs else "") + ")")
 
         if args.summary:
-            print_summary(sel, args.tz)
+            print_summary(sel, args.tz, config=config)
             continue
 
-        render_events(((path, rec, None) for rec in sel), args, all_rows)
+        render_events(((path, rec, None) for rec in sel), args, all_rows, config)
 
     if args.preset:
         PRESETS[args.preset](preset_recs, args.tz)
@@ -191,9 +196,9 @@ def main():
     if args.timeline:
         timeline.sort(key=lambda pr: (pr[1].utc == '', pr[1].utc))
         if args.summary:
-            print_summary([rec for _, rec in timeline], args.tz, files=len(paths))
+            print_summary([rec for _, rec in timeline], args.tz, files=len(paths), config=config)
         else:
-            render_events(((p, rec, os.path.basename(p)) for p, rec in timeline), args, all_rows)
+            render_events(((p, rec, os.path.basename(p)) for p, rec in timeline), args, all_rows, config)
 
     if args.json and all_rows:
         write_json(all_rows, args.json)

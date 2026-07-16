@@ -3,7 +3,7 @@
 import sys
 from collections import Counter
 
-from evtxview.constants import HOT_EID, INTERESTING_FIELDS
+from evtxview.config import DEFAULT_CONFIG
 from evtxview.util import to_local
 
 
@@ -16,25 +16,25 @@ class C:
     BOLD = '\033[1m' if on else ''; X = '\033[0m' if on else ''
 
 
-def summarize_line(rec, offset, source=None):
+def summarize_line(rec, offset, source=None, config=DEFAULT_CONFIG):
     t = to_local(rec.utc, offset)
     src = f"  {C.B}[{source}]{C.X}" if source else ''
     interesting = []
-    for key in INTERESTING_FIELDS:
+    for key in config.summary_fields:
         if key in rec.data and rec.data[key]:
             val = rec.data[key]
             if len(val) > 70:
                 val = val[:67] + '...'
             interesting.append(f"{key}={val}")
     extra = ' '.join(interesting[:4])
-    col = C.R if rec.eid in HOT_EID else C.CY
+    col = C.R if rec.eid in config.hot_eids else C.CY
     return f"{C.DIM}{t}{C.X}{src}  {col}EID {rec.eid:>5}{C.X}  {extra}"
 
 
-def full_dump(rec, offset, source=None):
+def full_dump(rec, offset, source=None, config=DEFAULT_CONFIG):
     print(f"{C.BOLD}{'=' * 70}{C.X}")
     src = f"  {C.B}[{source}]{C.X}" if source else ''
-    print(f"{C.R if rec.eid in HOT_EID else C.CY}EID {rec.eid}{C.X}{src}  "
+    print(f"{C.R if rec.eid in config.hot_eids else C.CY}EID {rec.eid}{C.X}{src}  "
           f"{C.DIM}{to_local(rec.utc, offset)} (local)  |  {rec.utc} UTC{C.X}")
     print(f"Provider: {rec.provider}  |  Computer: {rec.computer}")
     if rec.data:
@@ -43,7 +43,7 @@ def full_dump(rec, offset, source=None):
             print(f"   {C.Y}{k:>{w}}{C.X} = {v}")
 
 
-def print_summary(recs, tz, files=None):
+def print_summary(recs, tz, files=None, config=DEFAULT_CONFIG):
     """Сводка: количество, диапазон времени, распределение EventID."""
     cnt = Counter(r.eid for r in recs)
     times = sorted(r.utc for r in recs if r.utc)
@@ -53,5 +53,5 @@ def print_summary(recs, tz, files=None):
         print(f"  Диапазон (UTC): {times[0][:19]}  ..  {times[-1][:19]}")
     print("  EventID:")
     for eid, n in cnt.most_common():
-        hot = f" {C.R}<-- security-relevant{C.X}" if eid in HOT_EID else ""
+        hot = f" {C.R}<-- security-relevant{C.X}" if eid in config.hot_eids else ""
         print(f"    {eid:>6}: {n}{hot}")
