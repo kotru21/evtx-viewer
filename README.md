@@ -5,7 +5,7 @@
 [![CI](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
-![Tests](https://img.shields.io/badge/tests-78%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-89%20passing-brightgreen)
 [![Linting: Ruff](https://img.shields.io/badge/lint-ruff-261230)](https://github.com/astral-sh/ruff)
 ![Checked with mypy](https://img.shields.io/badge/mypy-checked-2a6db2)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -28,7 +28,7 @@
 - **Сводка** (`--summary`) — распределение EventID и диапазон времени; security-relevant EID подсвечены.
 - **Единый таймлайн** (`--timeline`) — события из нескольких `.evtx` сливаются в одну ленту, отсортированную по времени, с колонкой источника. Коррелирует Sysmon/Security/PowerShell в один поток.
 - **Пресеты** (`--preset`) — готовые представления под задачу. `process-tree` строит дерево процессов из Sysmon EID 1 (по `ProcessGuid`→`ParentProcessGuid`); `logon-analysis` разбирает входы Security (сессии 4624→4634, привилегированные логоны 4672, признаки brute-force по 4625); `network` группирует соединения Sysmon EID 3 по назначению, выводя необычные порты и исходящий с хоста трафик первыми; `rdp` сливает LocalSessionManager/RemoteConnectionManager/Security в единую хронологию RDP-активности.
-- **Фильтры** — по EventID (`--eid`), по подстроке в сыром XML (`--grep`), по времени (`--after`/`--before`).
+- **Фильтры** — по EventID (`--eid`), по подстроке в сыром XML (`--grep`), по времени (`--after`/`--before`; по умолчанию UTC, можно указать пояс суффиксом `+03:00`/`Z` или трактовать наивное время как локальное флагом `--tz-filter`).
 - **Экспорт** — CSV и JSON с метаполями (`_EventID`, `_UTC`, `_Local`, `_Provider`, `_Computer`, `_SourceFile`) и всеми полями события.
 - **Устойчивый разбор** — `ElementTree` с namespace/атрибутами/многострочными значениями и декодированием XML-сущностей; fallback на регулярки для битого XML. Работает с форматом `UserData` (PrintService и др.), не только `EventData`.
 - **Несколько файлов сразу** — маски (`*.evtx`) раскрываются, каждый файл в своей секции.
@@ -216,9 +216,10 @@ RDP-активность: 23 событий
 | `--preset rdp` | Хронология RDP из LSM/RCM/Security: логоны, переподключения, аутентификация, неудачные попытки |
 | `--eid 1,3,1102` | Фильтр по EventID (через запятую) |
 | `--grep СТРОКА` | Фильтр: подстрока в сыром XML (регистронезависимо) |
-| `--after "YYYY-MM-DD HH:MM"` | События не раньше указанного времени (UTC) |
-| `--before "YYYY-MM-DD HH:MM"` | События не позже указанного времени (UTC) |
+| `--after "YYYY-MM-DD HH:MM"` | События не раньше указанного времени. По умолчанию UTC; можно указать пояс суффиксом (`"...+03:00"`, `"...Z"`) |
+| `--before "YYYY-MM-DD HH:MM"` | События не позже указанного времени. Та же трактовка, что у `--after` |
 | `--tz N` | Сдвиг локального времени в часах для вывода (по умолчанию `+3`) |
+| `--tz-filter` | `--after`/`--before` без явного пояса трактовать в зоне `--tz`, а не UTC |
 | `--csv FILE` | Экспорт отобранных событий в CSV. Несовместим с `--summary`/`--preset` (они не строят построчную выборку) |
 | `--json FILE` | Экспорт отобранных событий в JSON. Те же ограничения, что у `--csv` |
 | `--limit N` | Показать в терминале не более N событий. На `--csv`/`--json` не влияет — экспорт всегда содержит все отобранные события |
@@ -244,7 +245,6 @@ RDP-активность: 23 событий
 
 ## Ограничения и планы
 
-- Фильтры `--after`/`--before` принимают время только в UTC (флаг локального времени — в планах).
 - Все четыре запланированных пресета готовы: `process-tree`, `logon-analysis`, `network`, `rdp`.
 - Весь файл загружается в память списком; потоковый режим для многогигабайтных логов — в планах.
 - Набор security-relevant EventID и выбор полей для однострочной сводки заданы под Sysmon/Security; вынос в конфиг — в планах.

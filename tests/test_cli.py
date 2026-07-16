@@ -102,6 +102,24 @@ def test_after_before_window(monkeypatch, capsys, security_evtx):
     assert len(_event_lines(out)) == 5
 
 
+def test_after_filter_with_explicit_offset(monkeypatch, capsys, security_evtx):
+    # 15:50 +03:00 — тот же момент, что 12:50 UTC из test_after_filter_excludes_earlier
+    out = run(monkeypatch, capsys, security_evtx, "--after", "2026-05-11 15:50 +03:00")
+    assert len(_event_lines(out)) == 6
+
+
+def test_after_filter_with_tz_filter_flag(monkeypatch, capsys, security_evtx):
+    # --tz-filter: наивное значение трактуется в зоне --tz (по умолч. +3)
+    out = run(monkeypatch, capsys, security_evtx, "--tz-filter", "--after", "2026-05-11 15:50")
+    assert len(_event_lines(out)) == 6
+
+
+def test_time_filter_header_shows_interpretation(monkeypatch, capsys, security_evtx):
+    out = run(monkeypatch, capsys, security_evtx, "--after", "2026-05-11 15:50 +03:00")
+    assert "Фильтр по времени" in out
+    assert "2026-05-11T15:50:00+03:00" in out
+
+
 # ---------- grep ----------
 def test_grep_matches_raw_xml(monkeypatch, capsys, security_evtx):
     # только событие очистки лога (провайдер Microsoft-Windows-Eventlog)

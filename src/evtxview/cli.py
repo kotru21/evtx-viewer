@@ -37,9 +37,12 @@ def build_parser():
     ap.add_argument('files', nargs='+', help='.evtx файл(ы), поддерживает маски (*.evtx)')
     ap.add_argument('--eid', help='фильтр по EventID (через запятую: 1,3,1102)')
     ap.add_argument('--grep', help='фильтр: подстрока в сыром XML (регистронезависимо)')
-    ap.add_argument('--after', help='события после времени "YYYY-MM-DD HH:MM" (UTC)')
-    ap.add_argument('--before', help='события до времени (UTC)')
+    ap.add_argument('--after', help='события после времени "YYYY-MM-DD HH:MM" '
+                     '(по умолч. UTC; можно указать пояс суффиксом "+03:00" или "Z")')
+    ap.add_argument('--before', help='события до времени (та же трактовка, что у --after)')
     ap.add_argument('--tz', type=float, default=3.0, help='сдвиг локального времени в часах (по умолч. +3)')
+    ap.add_argument('--tz-filter', action='store_true',
+                     help='--after/--before без явного пояса трактовать в зоне --tz, а не UTC')
     ap.add_argument('--summary', action='store_true', help='сводка: распределение EID и диапазон времени')
     ap.add_argument('--full', action='store_true', help='полный дамп всех полей каждого события')
     ap.add_argument('--timeline', action='store_true', help='единая лента из всех файлов, отсортированная по времени')
@@ -134,9 +137,18 @@ def main():
         paths.extend(sorted(glob.glob(f)) or [f])
 
     eid_filter = set(args.eid.split(',')) if args.eid else None
-    after = parse_dt(args.after) if args.after else None
-    before = parse_dt(args.before) if args.before else None
+    tz_filter_hours = args.tz if args.tz_filter else None
+    after = parse_dt(args.after, tz_filter_hours) if args.after else None
+    before = parse_dt(args.before, tz_filter_hours) if args.before else None
     grep = args.grep.lower() if args.grep else None
+
+    if after or before:
+        bits = []
+        if after:
+            bits.append(f"после {after.isoformat()}")
+        if before:
+            bits.append(f"до {before.isoformat()}")
+        print(f"{C.DIM}Фильтр по времени: {' и '.join(bits)}{C.X}\n")
 
     all_rows = []
     timeline = []      # (path, rec) со всех файлов для --timeline

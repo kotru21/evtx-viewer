@@ -1,5 +1,5 @@
 """Юнит-тесты чистых функций разбора полей — без чтения .evtx файлов."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -91,6 +91,50 @@ def test_parse_dt_formats():
 def test_parse_dt_bad_raises():
     with pytest.raises(SystemExit):
         parse_dt("not-a-date")
+
+
+def test_parse_dt_explicit_offset_suffix():
+    dt = parse_dt("2026-05-11 15:57:00 +03:00")
+    assert dt == datetime(2026, 5, 11, 15, 57, tzinfo=timezone(timedelta(hours=3)))
+
+
+def test_parse_dt_explicit_offset_compact():
+    # без двоеточия: "+0300"
+    dt = parse_dt("2026-05-11 15:57:00+0300")
+    assert dt == datetime(2026, 5, 11, 15, 57, tzinfo=timezone(timedelta(hours=3)))
+
+
+def test_parse_dt_z_suffix_is_utc():
+    dt = parse_dt("2026-05-11 12:57:00Z")
+    assert dt == datetime(2026, 5, 11, 12, 57, tzinfo=timezone.utc)
+
+
+def test_parse_dt_negative_offset():
+    dt = parse_dt("2026-05-11 07:57:00 -05:00")
+    assert dt == datetime(2026, 5, 11, 7, 57, tzinfo=timezone(timedelta(hours=-5)))
+
+
+def test_parse_dt_utc_and_offset_are_equivalent_instant():
+    # 12:57 UTC и 15:57 +03:00 — один и тот же момент времени
+    assert parse_dt("2026-05-11 12:57:00") == parse_dt("2026-05-11 15:57:00 +03:00")
+
+
+def test_parse_dt_naive_defaults_to_utc_without_tz_filter():
+    dt = parse_dt("2026-05-11 12:57:00")
+    assert dt.tzinfo == timezone.utc
+
+
+def test_parse_dt_tz_filter_hours_interprets_naive_as_local():
+    dt = parse_dt("2026-05-11 15:57:00", tz_filter_hours=3.0)
+    assert dt == datetime(2026, 5, 11, 15, 57, tzinfo=timezone(timedelta(hours=3)))
+    # эквивалентно тому же моменту, что и явный UTC 12:57
+    assert dt == parse_dt("2026-05-11 12:57:00")
+
+
+def test_parse_dt_explicit_offset_overrides_tz_filter():
+    # явный суффикс в значении важнее --tz-filter
+    dt = parse_dt("2026-05-11 12:57:00 +00:00", tz_filter_hours=3.0)
+    assert dt.utcoffset() == timedelta(0)
 
 
 def test_summarize_line_truncates_long_values():
