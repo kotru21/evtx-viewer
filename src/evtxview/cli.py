@@ -20,14 +20,13 @@ import argparse
 import glob
 import os
 import sys
-from datetime import datetime
 
 from evtxview.export import export_row, write_csv, write_json
 from evtxview.presets import PRESETS
 from evtxview.reader import read_records, verify_completeness
 from evtxview.record import get_record_id, parse_record
 from evtxview.render import C, full_dump, print_summary, summarize_line
-from evtxview.util import force_utf8_output, parse_dt
+from evtxview.util import force_utf8_output, parse_dt, parse_utc
 
 
 def build_parser():
@@ -61,11 +60,8 @@ def filter_records(records, eid_filter, grep, after, before):
         if grep and grep not in rec.xml.lower():
             continue
         if after or before:
-            if not rec.utc:
-                continue
-            try:
-                dt = datetime.fromisoformat(rec.utc.replace('Z', '+00:00'))
-            except Exception:
+            dt = parse_utc(rec.utc)
+            if dt is None:
                 continue
             if after and dt < after:
                 continue

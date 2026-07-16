@@ -5,7 +5,7 @@
 [![CI](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
-![Tests](https://img.shields.io/badge/tests-54%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-64%20passing-brightgreen)
 [![Linting: Ruff](https://img.shields.io/badge/lint-ruff-261230)](https://github.com/astral-sh/ruff)
 ![Checked with mypy](https://img.shields.io/badge/mypy-checked-2a6db2)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -27,7 +27,7 @@
 - **Проверка полноты** (`--verify`) — сверка с заголовками chunk'ов и поиск пропущенных `EventRecordID`; печатает `OK` или `!!! ОБРЕЗКА` со списком потерянных ID.
 - **Сводка** (`--summary`) — распределение EventID и диапазон времени; security-relevant EID подсвечены.
 - **Единый таймлайн** (`--timeline`) — события из нескольких `.evtx` сливаются в одну ленту, отсортированную по времени, с колонкой источника. Коррелирует Sysmon/Security/PowerShell в один поток.
-- **Пресеты** (`--preset`) — готовые представления под задачу. `process-tree` строит дерево процессов из Sysmon EID 1 (по `ProcessGuid`→`ParentProcessGuid`).
+- **Пресеты** (`--preset`) — готовые представления под задачу. `process-tree` строит дерево процессов из Sysmon EID 1 (по `ProcessGuid`→`ParentProcessGuid`); `logon-analysis` разбирает входы Security (сессии 4624→4634, привилегированные логоны 4672, признаки brute-force по 4625).
 - **Фильтры** — по EventID (`--eid`), по подстроке в сыром XML (`--grep`), по времени (`--after`/`--before`).
 - **Экспорт** — CSV и JSON с метаполями (`_EventID`, `_UTC`, `_Local`, `_Provider`, `_Computer`, `_SourceFile`) и всеми полями события.
 - **Устойчивый разбор** — `ElementTree` с namespace/атрибутами/многострочными значениями и декодированием XML-сущностей; fallback на регулярки для битого XML. Работает с форматом `UserData` (PrintService и др.), не только `EventData`.
@@ -152,6 +152,19 @@ $ evtxview Sysmon.evtx --preset process-tree
 └─ 15:27:58  net.exe (888)  net localgroup "Remote Desktop Users" john /add
 ```
 
+**6. Разобрать входы** — сессии, привилегированные логоны и признаки brute-force из Security 4624/4625/4634/4672:
+
+```console
+$ evtxview Security.evtx --preset logon-analysis
+Анализ входов (Security): 2 успешных, 0 неуспешных
+
+vm1-PC\vm1  (2 вход(ов))
+    2026-05-11 15:57:40 -> 15:58:22  (0:42)  LogonType=RemoteInteractive(RDP)  IP=10.8.0.2  [privileged: 4672]
+    2026-05-11 15:57:40 -> 15:57:41  (0:00)  LogonType=RemoteInteractive(RDP)  IP=10.8.0.2
+```
+
+Сессии строятся парой 4624→4634 по `TargetLogonId` (длительность считается из совпавшей пары); вход помечается `[privileged: 4672]`, если по тому же `LogonId` было выдано специальное право. При наличии неудачных входов (4625) выводится их список и, если по одной учётке или IP набирается 5+ неудач за 5 минут, — предупреждение о вероятном brute-force.
+
 ## Опции
 
 | Флаг | Назначение |
@@ -162,6 +175,7 @@ $ evtxview Sysmon.evtx --preset process-tree
 | `--full` | Полный дамп всех полей каждого события |
 | `--timeline` | Единая лента из всех файлов, отсортированная по времени (колонка источника) |
 | `--preset process-tree` | Дерево процессов из Sysmon EID 1 (`ProcessGuid`→`ParentProcessGuid`) |
+| `--preset logon-analysis` | Сессии, привилегированные входы и brute-force из Security 4624/4625/4634/4672 |
 | `--eid 1,3,1102` | Фильтр по EventID (через запятую) |
 | `--grep СТРОКА` | Фильтр: подстрока в сыром XML (регистронезависимо) |
 | `--after "YYYY-MM-DD HH:MM"` | События не раньше указанного времени (UTC) |
@@ -193,7 +207,7 @@ $ evtxview Sysmon.evtx --preset process-tree
 ## Ограничения и планы
 
 - Фильтры `--after`/`--before` принимают время только в UTC (флаг локального времени — в планах).
-- Пресеты `logon-analysis`, `network`, `rdp` — в планах (готов `process-tree`).
+- Пресеты `network`, `rdp` — в планах (готовы `process-tree`, `logon-analysis`).
 - Весь файл загружается в память списком; потоковый режим для многогигабайтных логов — в планах.
 - Набор security-relevant EventID и выбор полей для однострочной сводки заданы под Sysmon/Security; вынос в конфиг — в планах.
 

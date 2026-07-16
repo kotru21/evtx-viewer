@@ -16,6 +16,17 @@ def force_utf8_output():
                 pass
 
 
+def parse_utc(utc_str):
+    """EventRecord.utc (ISO-строка) -> datetime с tzinfo, либо None, если не парсится."""
+    if not utc_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(utc_str.replace('Z', '+00:00'))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
 def to_local(utc_str, offset_hours):
     """ISO UTC -> локальное время со сдвигом. Непарсимую строку отдаём как есть."""
     if not utc_str:

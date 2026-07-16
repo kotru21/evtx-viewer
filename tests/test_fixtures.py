@@ -1,8 +1,9 @@
 """Интеграционные тесты на реальных .evtx (золотые ожидания по известным записям)."""
 from collections import Counter
 
+from evtxview.presets import logon_analysis
 from evtxview.reader import read_records, verify_completeness
-from evtxview.record import get_data_fields, get_eid, get_record_id
+from evtxview.record import get_data_fields, get_eid, get_record_id, parse_record
 
 
 def test_read_records_security(security_evtx):
@@ -102,6 +103,21 @@ def test_verify_normal_range_still_enumerates(tmp_path):
     assert v["range_unreliable"] is False
     assert v["missing"] == [102]
     assert v["complete"] is False
+
+
+def test_logon_analysis_on_real_security_fixture(security_evtx, capsys):
+    """Золотые ожидания по реальной RDP-сессии в security.evtx: два входа vm1,
+    привилегированная сессия (0x286619, 42с) и короткая (0x286631, 0с)."""
+    recs, _ = read_records(security_evtx)
+    records = [parse_record(x) for x in recs]
+    logon_analysis(records, tz=0)
+    out = capsys.readouterr().out
+    assert "2 успешных, 0 неуспешных" in out
+    assert "vm1-PC\\vm1" in out
+    assert "IP=10.8.0.2" in out
+    assert "RemoteInteractive(RDP)" in out
+    assert "[privileged: 4672]" in out
+    assert "(0:42)" in out  # сессия 0x286619: 12:57:40 -> 12:58:22
 
 
 def test_printservice_userdata(printservice_evtx):
