@@ -1,6 +1,6 @@
 """Тесты пресетов анализа."""
 from evtxview.record import EventRecord
-from evtxview.presets import logon_analysis, network, process_tree
+from evtxview.presets import logon_analysis, network, process_tree, rdp_activity
 
 
 def proc(guid, pguid, image, pid, utc, cmd=""):
@@ -209,3 +209,72 @@ def test_network_empty(capsys):
     network(records, tz=0)
     out = capsys.readouterr().out
     assert "Нет событий Sysmon EID 3" in out
+
+
+# ---------- rdp ----------
+LSM = "Microsoft-Windows-TerminalServices-LocalSessionManager"
+RCM = "Microsoft-Windows-TerminalServices-RemoteConnectionManager"
+
+
+def lsm_event(eid, utc, user="vm1-PC\\john", address="10.8.0.2"):
+    return EventRecord(xml="", eid=eid, utc=utc, provider=LSM,
+                        data={"User": user, "Address": address})
+
+
+def rcm_auth(utc, user="john", ip="10.8.0.2"):
+    return EventRecord(xml="", eid="1149", utc=utc, provider=RCM,
+                        data={"Param1": user, "Param3": ip})
+
+
+def sec_logon(eid, utc, user="john", domain="vm1-PC", ip="10.8.0.2", logon_type="10"):
+    return EventRecord(xml="", eid=eid, utc=utc,
+                        data={"TargetUserName": user, "TargetDomainName": domain,
+                              "IpAddress": ip, "LogonType": logon_type})
+
+
+def test_rdp_merges_sources_chronologically(capsys):
+    records = [
+        lsm_event("21", "2026-05-11T12:00:01Z"),
+        rcm_auth("2026-05-11T12:00:00Z"),
+        sec_logon("4624", "2026-05-11T12:00:02Z"),
+    ]
+    rdp_activity(records, tz=0)
+    out = capsys.readouterr().out
+    assert "3 событий" in out
+    lines = [ln for ln in out.splitlines() if "2026-05-11" in ln]
+    assert len(lines) == 3
+    # аутентификация (1149) раньше логона (21), раньше входа в Security
+    assert "аутентификация" in lines[0]
+    assert "логон" in lines[1]
+    assert "вход (Security 4624)" in lines[2]
+
+
+def test_rdp_highlights_failed_logon(capsys):
+    records = [sec_logon("4625", "2026-05-11T12:00:00Z", user="attacker")]
+    rdp_activity(records, tz=0)
+    out = capsys.readouterr().out
+    assert "НЕУДАЧНЫЙ вход (Security 4625)" in out
+    assert "attacker" in out
+
+
+def test_rdp_ignores_non_rdp_logon_type(capsys):
+    # LogonType=2 (Interactive) — не RDP, не должен попасть в вывод
+    records = [sec_logon("4624", "2026-05-11T12:00:00Z", logon_type="2")]
+    rdp_activity(records, tz=0)
+    out = capsys.readouterr().out
+    assert "Нет событий RDP-активности" in out
+
+
+def test_rdp_ignores_eid_collision_from_other_provider(capsys):
+    # EID 21 без провайдера LSM не должен трактоваться как RDP-логон
+    records = [EventRecord(xml="", eid="21", utc="2026-05-11T12:00:00Z", provider="SomeOtherApp")]
+    rdp_activity(records, tz=0)
+    out = capsys.readouterr().out
+    assert "Нет событий RDP-активности" in out
+
+
+def test_rdp_empty(capsys):
+    records = [EventRecord(xml="", eid="1", utc="2026-05-11T12:00:00Z")]
+    rdp_activity(records, tz=0)
+    out = capsys.readouterr().out
+    assert "Нет событий RDP-активности" in out

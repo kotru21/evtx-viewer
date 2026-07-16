@@ -5,7 +5,7 @@
 [![CI](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
-![Tests](https://img.shields.io/badge/tests-72%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-78%20passing-brightgreen)
 [![Linting: Ruff](https://img.shields.io/badge/lint-ruff-261230)](https://github.com/astral-sh/ruff)
 ![Checked with mypy](https://img.shields.io/badge/mypy-checked-2a6db2)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -27,7 +27,7 @@
 - **Проверка полноты** (`--verify`) — сверка с заголовками chunk'ов и поиск пропущенных `EventRecordID`; печатает `OK` или `!!! ОБРЕЗКА` со списком потерянных ID.
 - **Сводка** (`--summary`) — распределение EventID и диапазон времени; security-relevant EID подсвечены.
 - **Единый таймлайн** (`--timeline`) — события из нескольких `.evtx` сливаются в одну ленту, отсортированную по времени, с колонкой источника. Коррелирует Sysmon/Security/PowerShell в один поток.
-- **Пресеты** (`--preset`) — готовые представления под задачу. `process-tree` строит дерево процессов из Sysmon EID 1 (по `ProcessGuid`→`ParentProcessGuid`); `logon-analysis` разбирает входы Security (сессии 4624→4634, привилегированные логоны 4672, признаки brute-force по 4625); `network` группирует соединения Sysmon EID 3 по назначению, выводя необычные порты и исходящий с хоста трафик первыми.
+- **Пресеты** (`--preset`) — готовые представления под задачу. `process-tree` строит дерево процессов из Sysmon EID 1 (по `ProcessGuid`→`ParentProcessGuid`); `logon-analysis` разбирает входы Security (сессии 4624→4634, привилегированные логоны 4672, признаки brute-force по 4625); `network` группирует соединения Sysmon EID 3 по назначению, выводя необычные порты и исходящий с хоста трафик первыми; `rdp` сливает LocalSessionManager/RemoteConnectionManager/Security в единую хронологию RDP-активности.
 - **Фильтры** — по EventID (`--eid`), по подстроке в сыром XML (`--grep`), по времени (`--after`/`--before`).
 - **Экспорт** — CSV и JSON с метаполями (`_EventID`, `_UTC`, `_Local`, `_Provider`, `_Computer`, `_SourceFile`) и всеми полями события.
 - **Устойчивый разбор** — `ElementTree` с namespace/атрибутами/многострочными значениями и декодированием XML-сущностей; fallback на регулярки для битого XML. Работает с форматом `UserData` (PrintService и др.), не только `EventData`.
@@ -183,6 +183,24 @@ $ evtxview Sysmon.evtx --preset network
 
 Группировка — по `DestinationIp:Port`. «Необычный порт» — не входит в общеизвестные (DNS/RPC/SMB/RDP/…) и не из динамического RPC-диапазона (`49152+`, обычные callback-порты после негоциации через порт 135 — не помечаются, чтобы не заваливать вывод шумом). «Исходящее с этого хоста» — `Initiated=true`, то есть соединение инициировал сам хост, а не принял: как раз так выглядит recon и удалённый доступ атакующего на фоне обычного фонового трафика ОС.
 
+**8. Собрать хронологию RDP** — кто, откуда и когда входил, переподключался и выходил, из трёх источников сразу:
+
+```console
+$ evtxview LocalSessionManager.evtx RemoteConnectionManager.evtx Security.evtx --preset rdp
+RDP-активность: 23 событий
+
+2026-05-11 15:13:08  аутентификация (1149)     vm1                  10.8.0.2
+2026-05-11 15:13:09  логон                     vm1-PC\vm1           10.8.0.2
+2026-05-11 15:22:29  аутентификация (1149)     wnTnksI              10.8.0.2
+2026-05-11 15:28:28  аутентификация (1149)     john                 10.8.0.2
+2026-05-11 15:28:29  логон                     vm1-PC\john          10.8.0.2
+2026-05-11 15:28:29  запуск shell              vm1-PC\john          10.8.0.2
+2026-05-11 15:28:49  отключение                vm1-PC\john          10.8.0.2
+2026-05-11 15:28:58  переподключение           vm1-PC\john          10.8.0.2
+```
+
+Сливает три источника в единую хронологию: `TerminalServices-LocalSessionManager` (EID 21/22/23/24/25 — логон/shell/логофф/отключение/переподключение сессии), `TerminalServices-RemoteConnectionManager` (EID 1149 — успешная аутентификация; срабатывает раньше и надёжнее прочих, даже если сессия так и не была создана — как `wnTnksI` в примере выше, явно аномальное имя учётки без единого сопутствующего события логона), и `Security` (4624/4625 с `LogonType=10` — независимая сверка по журналу входов, неудачные попытки подсвечиваются). Работает, только если все три файла переданы вместе; при наличии лишь части источников использует то, что есть.
+
 ## Опции
 
 | Флаг | Назначение |
@@ -195,6 +213,7 @@ $ evtxview Sysmon.evtx --preset network
 | `--preset process-tree` | Дерево процессов из Sysmon EID 1 (`ProcessGuid`→`ParentProcessGuid`) |
 | `--preset logon-analysis` | Сессии, привилегированные входы и brute-force из Security 4624/4625/4634/4672 |
 | `--preset network` | Соединения Sysmon EID 3, сгруппированные по назначению; необычные порты и исходящие с хоста — первыми |
+| `--preset rdp` | Хронология RDP из LSM/RCM/Security: логоны, переподключения, аутентификация, неудачные попытки |
 | `--eid 1,3,1102` | Фильтр по EventID (через запятую) |
 | `--grep СТРОКА` | Фильтр: подстрока в сыром XML (регистронезависимо) |
 | `--after "YYYY-MM-DD HH:MM"` | События не раньше указанного времени (UTC) |
@@ -226,7 +245,7 @@ $ evtxview Sysmon.evtx --preset network
 ## Ограничения и планы
 
 - Фильтры `--after`/`--before` принимают время только в UTC (флаг локального времени — в планах).
-- Пресет `rdp` — в планах (готовы `process-tree`, `logon-analysis`, `network`).
+- Все четыре запланированных пресета готовы: `process-tree`, `logon-analysis`, `network`, `rdp`.
 - Весь файл загружается в память списком; потоковый режим для многогигабайтных логов — в планах.
 - Набор security-relevant EventID и выбор полей для однострочной сводки заданы под Sysmon/Security; вынос в конфиг — в планах.
 

@@ -241,8 +241,61 @@ def network(records, tz):
         print(f"    процессы: {', '.join(images)}")
 
 
+LSM_PROVIDER = 'Microsoft-Windows-TerminalServices-LocalSessionManager'
+RCM_PROVIDER = 'Microsoft-Windows-TerminalServices-RemoteConnectionManager'
+
+LSM_LABELS = {
+    '21': 'логон',
+    '22': 'запуск shell',
+    '23': 'логофф',
+    '24': 'отключение',
+    '25': 'переподключение',
+}
+
+
+def rdp_activity(records, tz):
+    """Хронология RDP-активности из нескольких источников: кто, откуда, когда
+    вошёл, переподключился или вышел.
+
+    TerminalServices-LocalSessionManager (EID 21/22/23/24/25) даёт
+    последовательность сессии; RemoteConnectionManager (EID 1149) —
+    самый ранний и надёжный источник source-IP (успешная аутентификация,
+    ещё до создания сессии); Security 4624/4625 с LogonType=10 —
+    независимая сверка по журналу входов. Событие ожидается на входе
+    от --preset уже слитым из всех переданных файлов (как --timeline),
+    поэтому разные провайдеры различаются по rec.provider/rec.eid.
+    """
+    events = []  # (utc, label, user, address)
+
+    for r in records:
+        if r.provider == LSM_PROVIDER and r.eid in LSM_LABELS:
+            events.append((r.utc, LSM_LABELS[r.eid], r.data.get('User') or '?',
+                            r.data.get('Address') or '-'))
+        elif r.provider == RCM_PROVIDER and r.eid == '1149':
+            events.append((r.utc, 'аутентификация (1149)', r.data.get('Param1') or '?',
+                            r.data.get('Param3') or '-'))
+        elif r.eid == '4624' and r.data.get('LogonType') == '10':
+            events.append((r.utc, 'вход (Security 4624)', _account_key(r),
+                            r.data.get('IpAddress') or '-'))
+        elif r.eid == '4625' and r.data.get('LogonType') == '10':
+            events.append((r.utc, 'НЕУДАЧНЫЙ вход (Security 4625)', _account_key(r),
+                            r.data.get('IpAddress') or '-'))
+
+    if not events:
+        print("  Нет событий RDP-активности (TerminalServices EID 21/22/23/24/25/1149, "
+              "Security 4624/4625 с LogonType=10) в выборке.")
+        return
+
+    events.sort(key=lambda e: e[0])
+    print(f"{C.BOLD}RDP-активность{C.X}: {len(events)} событий\n")
+    for utc, label, user, address in events:
+        col = C.R if label.startswith('НЕУДАЧНЫЙ') else C.CY
+        print(f"{C.DIM}{to_local(utc, tz)}{C.X}  {col}{label:<24}{C.X}  {user:<20} {address}")
+
+
 PRESETS = {
     'process-tree': process_tree,
     'logon-analysis': logon_analysis,
     'network': network,
+    'rdp': rdp_activity,
 }

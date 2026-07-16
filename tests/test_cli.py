@@ -206,6 +206,13 @@ def test_preset_network_wiring(monkeypatch, capsys, security_evtx):
     assert "Нет событий Sysmon EID 3" in out
 
 
+def test_preset_rdp_wiring(monkeypatch, capsys, security_evtx):
+    # реальные 4624 LogonType=10 в фикстуре — должны попасть в вывод пресета
+    out = run(monkeypatch, capsys, security_evtx, "--preset", "rdp")
+    assert "вход (Security 4624)" in out
+    assert "vm1-PC\\vm1" in out
+
+
 def test_preset_invalid_rejected(monkeypatch, capsys, security_evtx):
     with pytest.raises(SystemExit):
         run(monkeypatch, capsys, security_evtx, "--preset", "nope")
