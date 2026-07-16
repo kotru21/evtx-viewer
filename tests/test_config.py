@@ -1,4 +1,4 @@
-"""Тесты загрузки и мержа конфига (TODO #5).
+"""Тесты загрузки и мержа конфига.
 
 Изоляция от реального конфига машины (env var, ~/.config/...) обеспечена
 autouse-фикстурой isolate_from_machine_config в conftest.py.
@@ -92,7 +92,7 @@ def test_explicit_path_wins_over_env_var(monkeypatch, tmp_path):
     assert cfg.hot_eids == frozenset({"2222"})
 
 
-# ---------- секция объявлена не таблицей (#22) ----------
+# ---------- секция объявлена не таблицей ----------
 def test_section_as_scalar_raises_clear_error(tmp_path):
     """`highlight = "x"` вместо `[highlight]` — раньше падало сырым
     TypeError при попытке проиндексировать строку как словарь."""
@@ -109,7 +109,7 @@ def test_section_as_list_raises_clear_error(tmp_path):
         load_config(str(cfg_file))
 
 
-# ---------- неизвестные ключи/секции — предупреждение, не тишина (#23) ----------
+# ---------- неизвестные ключи/секции — предупреждение, не тишина ----------
 def test_unknown_key_in_highlight_warns_and_keeps_default(tmp_path, capsys):
     cfg_file = tmp_path / "cfg.toml"
     cfg_file.write_text('[highlight]\nhot_eid = ["1102"]\n', encoding="utf-8")  # опечатка: hot_eid

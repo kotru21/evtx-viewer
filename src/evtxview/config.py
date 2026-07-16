@@ -57,7 +57,7 @@ def _validate_str_list(value, key, path):
 def _get_table(data, key, path):
     """Секция как dict. Если ключ есть, но это не таблица (`highlight = "x"`
     вместо `[highlight]`) — явная ошибка, а не попытка проиндексировать
-    не-словарь дальше по коду (см. #22)."""
+    не-словарь дальше по коду."""
     value = data.get(key, {})
     if not isinstance(value, dict):
         sys.exit(f"{path}: секция '[{key}]' должна быть таблицей TOML "
@@ -67,7 +67,7 @@ def _get_table(data, key, path):
 
 def _warn_unknown(present, known, label, path):
     """Опечатка в ключе/секции иначе тихо не применяется — пользователь
-    решит, что оверрайд сработал, хотя применились дефолты (см. #23)."""
+    решит, что оверрайд сработал, хотя применились дефолты."""
     for key in sorted(set(present) - known):
         print(f"evtxview: предупреждение — {path}: неизвестный ключ "
               f"'{label}.{key}' проигнорирован", file=sys.stderr)
