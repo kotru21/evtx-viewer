@@ -5,7 +5,7 @@
 [![CI](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/kotru21/evtx-viewer/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
-![Tests](https://img.shields.io/badge/tests-49%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-54%20passing-brightgreen)
 [![Linting: Ruff](https://img.shields.io/badge/lint-ruff-261230)](https://github.com/astral-sh/ruff)
 ![Checked with mypy](https://img.shields.io/badge/mypy-checked-2a6db2)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -167,9 +167,9 @@ $ evtxview Sysmon.evtx --preset process-tree
 | `--after "YYYY-MM-DD HH:MM"` | События не раньше указанного времени (UTC) |
 | `--before "YYYY-MM-DD HH:MM"` | События не позже указанного времени (UTC) |
 | `--tz N` | Сдвиг локального времени в часах для вывода (по умолчанию `+3`) |
-| `--csv FILE` | Экспорт отобранных событий в CSV |
-| `--json FILE` | Экспорт отобранных событий в JSON |
-| `--limit N` | Показать не более N событий |
+| `--csv FILE` | Экспорт отобранных событий в CSV. Несовместим с `--summary`/`--preset` (они не строят построчную выборку) |
+| `--json FILE` | Экспорт отобранных событий в JSON. Те же ограничения, что у `--csv` |
+| `--limit N` | Показать в терминале не более N событий. На `--csv`/`--json` не влияет — экспорт всегда содержит все отобранные события |
 
 ## Проверка полноты
 

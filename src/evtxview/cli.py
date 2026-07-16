@@ -19,6 +19,7 @@ evtxview — просмотр и триаж Windows .evtx на любой ОС.
 import argparse
 import glob
 import os
+import sys
 from datetime import datetime
 
 from evtxview.export import export_row, write_csv, write_json
@@ -96,25 +97,41 @@ def print_verify(path, recs, errs):
 
 
 def render_events(items, args, all_rows):
-    """Печать событий (одной строкой или --full) с учётом --limit и экспорта.
+    """Печать событий (одной строкой или --full) с учётом --limit.
+
+    --limit ограничивает только то, что печатается в терминал. Экспорт в
+    CSV/JSON собирает ВСЕ отобранные события независимо от --limit — иначе
+    флаг для удобства чтения вывода незаметно урезал бы выгружаемые улики.
+
     items — последовательность (path, rec, source|None)."""
+    exporting = bool(args.csv or args.json)
     shown = 0
+    limited = False
     for path, rec, source in items:
+        if exporting:
+            all_rows.append(export_row(rec, path, args.tz))
         if args.limit and shown >= args.limit:
-            print(f"  {C.DIM}... (ограничено --limit {args.limit}){C.X}")
-            break
+            if not limited:
+                note = ", экспорт включает все события" if exporting else ""
+                print(f"  {C.DIM}... (ограничено --limit {args.limit}{note}){C.X}")
+                limited = True
+            if not exporting:
+                break
+            continue
         if args.full:
             full_dump(rec, args.tz, source=source)
         else:
             print(summarize_line(rec, args.tz, source=source))
         shown += 1
-        if args.csv or args.json:
-            all_rows.append(export_row(rec, path, args.tz))
 
 
 def main():
     force_utf8_output()
     args = build_parser().parse_args()
+
+    if (args.summary or args.preset) and (args.csv or args.json):
+        sys.exit("--csv/--json несовместимы с --summary/--preset: "
+                  "эти режимы не строят построчную выборку событий для экспорта")
 
     paths = []
     for f in args.files:

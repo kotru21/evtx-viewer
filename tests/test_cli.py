@@ -1,4 +1,6 @@
 """End-to-end тесты CLI через main() (argparse + вывод)."""
+import pytest
+
 from evtxview import cli
 
 
@@ -32,6 +34,34 @@ def test_limit_caps_output(monkeypatch, capsys, security_evtx):
     out = run(monkeypatch, capsys, security_evtx, "--limit", "2")
     eid_lines = [ln for ln in out.splitlines() if ln.strip().startswith("2026")]
     assert len(eid_lines) == 2
+
+
+def test_limit_does_not_truncate_export(monkeypatch, capsys, tmp_path, security_evtx):
+    """--limit ограничивает печать, но не то, что уходит в CSV/JSON."""
+    out_file = tmp_path / "out.csv"
+    out = run(monkeypatch, capsys, security_evtx, "--limit", "2", "--csv", str(out_file))
+    printed = [ln for ln in out.splitlines() if ln.strip().startswith("2026")]
+    assert len(printed) == 2
+    assert "экспорт включает все события" in out
+
+    import csv as _csv
+    with out_file.open(encoding="utf-8") as f:
+        rows = list(_csv.DictReader(f))
+    assert len(rows) == 7  # все отфильтрованные записи, не только напечатанные
+
+
+def test_summary_with_csv_rejected(monkeypatch, capsys, tmp_path, security_evtx):
+    out_file = tmp_path / "out.csv"
+    with pytest.raises(SystemExit):
+        run(monkeypatch, capsys, security_evtx, "--summary", "--csv", str(out_file))
+    assert not out_file.exists()
+
+
+def test_preset_with_json_rejected(monkeypatch, capsys, tmp_path, security_evtx):
+    out_file = tmp_path / "out.json"
+    with pytest.raises(SystemExit):
+        run(monkeypatch, capsys, security_evtx, "--preset", "process-tree", "--json", str(out_file))
+    assert not out_file.exists()
 
 
 def test_json_export(monkeypatch, capsys, tmp_path, security_evtx):
@@ -166,8 +196,6 @@ def test_preset_process_tree_wiring(monkeypatch, capsys, security_evtx):
 
 
 def test_preset_invalid_rejected(monkeypatch, capsys, security_evtx):
-    import pytest
-
     with pytest.raises(SystemExit):
         run(monkeypatch, capsys, security_evtx, "--preset", "nope")
 
